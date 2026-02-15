@@ -2,8 +2,11 @@
 # User Story 2
 
 As a user, I want meeting-related emails to be identified automatically so that I can prepare or respond more efficiently.
+
 Explanation: This focuses on a specific, high-value category of emails.
+
 T-shirt size: Small
+
 Sprint fit: Easily achievable with Gemini-backed intent classification in one sprint
 
 ---
