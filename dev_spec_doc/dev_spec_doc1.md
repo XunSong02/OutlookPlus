@@ -642,7 +642,7 @@ flowchart TD
 	L -- No --> M[Mark as Normal + reason: Unable to score]
 	L -- Yes --> N{priorityFlag}
 	N -- High --> O[Render High badge + reasons]
-	N -- Normal --> P[Render Normal (no badge) + optional reasons]
+	N -- Normal --> P[Render Normal no badge optional reasons]
 
 	O --> Q[Inbox ready]
 	P --> Q
