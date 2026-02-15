@@ -17,6 +17,23 @@ US3 uses the meeting classification result from US2 to improve reply-need predic
 - When an email is classified as meeting-related by US2, US3 gives stronger confidence to NEEDS_REPLY if the email also contains a direct question or action request.
 - This dependency means US2 must be implemented first, or at minimum, US2's API endpoint must be available for US3 to call.
 
+---
+
+# Modifications to US2 Dev Spec
+
+To support User Story 3, the development specification of User Story 2 was updated as follows:
+
+1. **API Changes**  
+   The meeting detection response was extended to include a boolean field `meetingRelated`. An internal endpoint (`/api/meeting/check`) was exposed so that downstream services (such as ReplyNeedService) can reuse the classification result.
+
+2. **Data Model Changes**  
+   A new field `meetingRelated` was added to the internal email data model and made accessible to other modules.
+
+3. **Architecture Updates**  
+   The system architecture was updated to include a data flow from Meeting Detection to ReplyNeedService, making the dependency explicit.
+
+4. **Class Design Updates**  
+   MeetingService was extended to provide access to the classification result while maintaining modular separation.
 
 ---
 
@@ -41,7 +58,7 @@ The system classifies an email as NEEDS_REPLY, NO_REPLY_NEEDED, or UNSURE, helpi
 - Classification is triggered when the user opens an email.
 
 ## Rationale
-A three-label system keeps the feature lightweight and safe. By including UNSURE as an option, we reduce the risk of giving users wrong advice. This builds trust because the system admits when it's not sure instead of guessing. The confidence score and reason tags help users understand why the system made its decision, which makes the feature more transparent and useful.
+I chose a three-label system because it's simple to implement in one sprint and safe for users. Having an UNSURE option means we don't have to pretend we're confident when we're not - this seemed more honest than forcing every email into just two categories. The confidence score and reason tags help users understand the decision, which I think is important for building trust in the AI feature.
 
 ## Chat Log
 
@@ -90,15 +107,15 @@ The three-label system keeps the feature lightweight and safe. By including UNSU
 2. Client retrieves email metadata and body from Email Provider API
 3. Client sends sanitized email data to Backend Controller
 4. Backend runs RuleEngine for quick classification
-4.5. Backend calls US2 MeetingService to check if email is meeting-related
-5. If RuleEngine is confident → skip to step 7
-6. If RuleEngine is uncertain → Backend calls LLM API
-7. DecisionAggregator combines rule and/or LLM results
-8. OutputValidator checks the output for safety
-9. Backend returns label + confidence + reasons to Client
-10. Client displays suggestion to user
-11. (Optional) User provides feedback, sent back to Backend
-12. Backend stores feedback in Database
+5. Backend calls US2 MeetingService to check if email is meeting-related
+6. If RuleEngine is confident → skip to step 8
+7. If RuleEngine is uncertain → Backend calls LLM API
+8. DecisionAggregator combines rule and/or LLM results
+9. OutputValidator checks the output for safety
+10. Backend returns label + confidence + reasons to Client
+11. Client displays suggestion to user
+12. (Optional) User provides feedback, sent back to Backend
+13. Backend stores feedback in Database
 ```mermaid
 flowchart TB
   subgraph Client["Client (Browser/Email UI)"]
@@ -143,7 +160,7 @@ flowchart TB
 
 ## Rationale
 
-Using rule-based checks first helps reduce cost and latency. Simple cases like "FYI" emails or newsletters can be classified quickly without calling the LLM. The LLM is only used when the rules aren't confident enough, which keeps API costs low. Having a cache layer means we don't re-classify the same email multiple times. Strict validation at the end ensures we never send invalid data to the user - if something goes wrong, we default to UNSURE instead of showing a wrong label.
+I put the rule checks before the LLM because calling the API is expensive and slow. For simple emails like "FYI" messages, we can just use rules and save money. The cache is there so if someone opens the same email twice, we don't classify it again. And the validator at the end is basically a safety net - if anything weird happens, we just default to UNSURE instead of showing garbage to the user.
 
 ## Chat Log
 
@@ -238,7 +255,7 @@ classDiagram
 
 ## Rationale
 
-The classes are organized by their responsibilities. The controller just handles HTTP stuff, the service coordinates everything, and each other class has one specific job. This makes the code easier to test and maintain. If we need to change how rules work, we only touch RuleEngine. If we want to switch LLM providers, we only change LlmClassifier. This separation of concerns is a standard software design pattern.
+I organized the classes so each one does one thing. The controller deals with HTTP requests, the service coordinates everything, and the other classes handle specific tasks like running rules or validating output. This way if I need to change how rules work later, I only have to edit the RuleEngine class. Same thing if we want to switch from OpenAI to a different LLM provider - just change the LlmClassifier. It's easier to test too because you can test each piece separately.
 
 ## Chat Log
 
@@ -303,7 +320,7 @@ OutputValidator:
 
 **Dependencies:** ReplyNeedService
 
-**Why this exists:** We need a layer that deals with HTTP stuff like parsing request bodies, handling errors, and formatting responses. This keeps network concerns separate from business logic.
+**Why this exists:** We need something to handle the HTTP layer - parsing JSON, checking for errors, formatting responses. Keeping this separate from the business logic makes the code cleaner.
 
 ## ReplyNeedService
 **Responsibility:** Orchestrates the entire classification workflow.
@@ -316,7 +333,7 @@ OutputValidator:
 
 **Integration with US2:** Calls `MeetingService.getMeetingRelatedStatus()` to check if the email is meeting-related. This information is used by the aggregator to boost confidence when appropriate.
 
-**Why this exists:** This is the brain of the system. It decides when to use rules vs LLM, coordinates all the pieces, and makes sure everything happens in the right order.
+**Why this exists:** This is basically the brain that decides what to do. Should we use rules? Should we call the LLM? It coordinates everything.
 
 ## RuleEngine
 **Responsibility:** Applies fast heuristic rules for common email patterns.
@@ -329,7 +346,7 @@ OutputValidator:
 
 **Returns:** RuleResult with label (NEEDS_REPLY, NO_REPLY_NEEDED, or UNSURE) and confidence score (0-1).
 
-**Why this exists:** Many emails have obvious patterns that don't need AI. Rules are fast and free, so we use them first to save on API costs.
+**Why this exists:** A lot of emails are really obvious - like if it says "FYI only" we don't need AI to know that. Rules are fast and free so we check them first.
 
 ## LlmClassifier
 **Responsibility:** Calls external LLM API for complex classification cases.
@@ -341,7 +358,7 @@ OutputValidator:
 
 **Dependencies:** External LLM API (OpenAI GPT-4 or Google Gemini)
 
-**Why this exists:** When rules aren't confident, we need smarter analysis. The LLM can understand context, tone, and nuanced situations that simple rules can't handle.
+**Why this exists:** When rules aren't enough, we need something smarter. The LLM can understand context and tone that rules can't catch.
 
 ## DecisionAggregator
 **Responsibility:** Combines rule-based and LLM outputs to make a final decision.
@@ -358,7 +375,7 @@ OutputValidator:
 - If they disagree, lower confidence
 - **Meeting-aware boosting:** If email is meeting-related (from US2) AND contains direct question, increase NEEDS_REPLY confidence by 0.1-0.15
 
-**Why this exists:** Sometimes we have two opinions (rules and LLM) and need to decide which to trust. This class encodes our decision logic in one place.
+**Why this exists:** Sometimes rules say one thing and the LLM says another. We need logic to decide which one to trust. This class has all those decision rules in one place.
 
 ## OutputValidator
 **Responsibility:** Ensures all outputs are safe, valid, and follow the correct schema.
@@ -370,11 +387,11 @@ OutputValidator:
 
 **Safety:** Prevents invalid data from reaching the client. No matter what goes wrong (LLM returns garbage, rules crash, etc.), the user always gets a valid response.
 
-**Why this exists:** LLMs can be unpredictable and return weird outputs. This is our safety net that makes sure we never show broken data to users.
+**Why this exists:** LLMs can be unpredictable. This is our last line of defense to make sure we never show broken data to users.
 
 ## Rationale
 
-Clear separation of concerns makes the code easier to understand, test, and modify. Each class has one job and one reason to change. If we want to add new rules, we only touch RuleEngine. If we want to switch from OpenAI to Anthropic, we only change LlmClassifier. Having separate validation means we can test safety independently. This design follows standard MVC patterns and makes the codebase maintainable for future developers.
+I split everything into separate classes because it's easier to work with. If I want to add a new rule, I only touch RuleEngine. If OpenAI changes their API, I only change LlmClassifier. And having the validator separate means I can test it independently to make sure it catches all the edge cases. It's just cleaner and easier to maintain.
 
 ## Chat Log
 
@@ -419,8 +436,7 @@ stateDiagram-v2
 
 ## Rationale
 
-This lifecycle tracks an email from arrival to completion. We keep it simple with just a few states: unprocessed (sitting in inbox), requested (user opens it), processing (backend classifies it), shown (displayed to user), and done. The feedback branch is optional - most users will just close the email. This simplified state machine is appropriate for an MVP and avoids over-engineering the state tracking.
-
+I kept the state diagram simple because we don't need to track every little thing that happens internally. The main states are what matters to the user: email sitting unread, user opens it and requests classification, backend processes it, result gets shown, and then either the user gives feedback or just closes it. All the internal stuff like rule checking and LLM calls happen inside the "Processing" state. This is enough for an MVP.
 
 ## Chat Log
 
@@ -444,7 +460,6 @@ Should we track every internal step like rule checking and LLM calling as separa
 
 **Assistant:**
 Not for an MVP. We just need high-level states that the user cares about: email is unprocessed, user requests classification (opens email), backend processes it, result is shown. The internal steps (rules, LLM, validation) all happen inside "Processing" state. Keeping it simple makes the code easier to build and maintain.
-
 
 ---
 
@@ -479,7 +494,7 @@ flowchart TD
 
 ## Rationale
 
-The flow chart shows the complete request lifecycle with all decision points. Key optimizations: cache check happens first to avoid redundant work, rule check happens before LLM to save costs, and validation ensures we always return safe output. The feedback loop is optional but important for future improvements. This flow balances speed (caching, rules first), cost (avoid unnecessary LLM calls), and safety (validation, UNSURE fallback).
+The flow shows all the decision points. Cache check comes first because if we already classified this email before, why do it again? Then we try rules because they're fast and cheap. Only if rules aren't confident do we call the expensive LLM. The validator makes sure nothing broken gets through - if validation fails, we just default to UNSURE. And the optional feedback at the end lets us improve the system later.
 
 ## Chat Log
 
@@ -619,7 +634,7 @@ That's what the validator is for. It checks that the label is exactly one of our
 
 ## Rationale
 
-The most critical risk is false NO_REPLY_NEEDED because it could cause users to miss important emails. That's why we prioritize safety through the UNSURE option and showing reasons. Privacy is also crucial since we're handling potentially sensitive information, so we minimize data retention and logging. The other mitigations focus on making the system robust and cost-effective for production use.
+The biggest risk is false negatives - telling someone they don't need to reply when they actually do. That could make them miss important stuff. That's why we use UNSURE a lot and show the confidence score. Privacy is also a concern since we're sending email content to an external API, so we try to minimize what we send and don't store anything. The other stuff is about making sure the system actually works when we deploy it - handling API failures, keeping costs under control, etc.
 
 ## Chat Log
 
@@ -689,7 +704,7 @@ That's why we have rules as a fallback. If the LLM API is unreachable, we just u
 
 ## Rationale
 
-This stack balances rapid development with production readiness. FastAPI or Express let us build the backend quickly with good async support for handling LLM API calls. Using established LLM providers (OpenAI/Gemini) means we don't need to host or train models ourselves, which saves massive time and complexity for an MVP. Redis caching is essential for performance - it prevents redundant LLM calls and keeps costs down. PostgreSQL provides reliable storage for feedback without requiring complex data modeling. The hosting options (Vercel/Railway/Lambda) all support quick deployment with minimal DevOps work, which fits our one-sprint timeline. Everything in this stack has good documentation and community support, so we won't get stuck on obscure problems.
+I picked this stack because it's fast to develop with and we only have one sprint. FastAPI handles async calls to the LLM really well, and it auto-generates API docs which is convenient. We're using OpenAI or Gemini instead of hosting our own model because that would take way too long. Redis is standard for caching and it's super fast. PostgreSQL is reliable for storing feedback. And Vercel or Railway make deployment easy - you just connect GitHub and it deploys automatically. Everything here has good documentation so we won't get stuck.
 
 ## Chat Log
 
@@ -853,7 +868,7 @@ This call happens internally during US3's classification workflow and is transpa
 
 ## Rationale
 
-Separating prediction and feedback into two endpoints keeps the core API simple and focused. The prediction endpoint has all the fields needed for classification but nothing extra. Returning `cached: true/false` helps with debugging and lets us track cache hit rates. The feedback endpoint is intentionally simple - just enough to record whether we got it right. We don't force users to explain why it's wrong; the optional comment field is there if they want to elaborate. Using enum values for labels ensures type safety and prevents typos. Including confidence and reasons in the response gives users transparency about how the system made its decision.
+I split prediction and feedback into separate endpoints to keep things simple. The prediction endpoint has everything needed for classification. The `cached` field helps with debugging. The feedback endpoint is bare-bones - just enough to record if we got it right or wrong. The optional comment is there if users want to explain why it was wrong. Using enums for labels prevents typos. And including confidence + reasons in the response lets users see how we made the decision.
 
 ## Chat Log
 
@@ -1010,7 +1025,7 @@ def set_cached_result(message_id: str, result: ReplyNeedResponse, ttl: int = 360
 
 ## Rationale
 
-Minimal public interfaces reduce complexity and surface area for bugs. The user only sees: the label, the tooltip, and feedback buttons. This keeps the UI clean and doesn't overwhelm them with technical details. The confidence score and reasons provide transparency without being too verbose. Making feedback optional respects user time - most people won't give feedback and that's okay. The API is also minimal: just two endpoints. Having clear rate limits prevents abuse and controls costs. For developers, the internal interfaces are simple function signatures that each class must implement, which makes the code easy to understand and extend.
+I kept the interfaces minimal to reduce complexity. Users only see the label, tooltip, and feedback buttons - nothing overwhelming. The confidence score and reasons give transparency without being too technical. Making feedback optional is important because most people probably won't bother. The API only has two endpoints which keeps it simple. Rate limits prevent abuse and control costs. For internal interfaces, I just defined the function signatures each class needs to implement.
 
 ## Chat Log
 
@@ -1264,7 +1279,7 @@ CREATE TABLE user_feedback (
 
 ## Rationale
 
-Strict schemas with validation prevent invalid data from entering the system. Setting `additionalProperties: false` means any extra fields in requests get rejected, which catches client bugs early. Using enums for labels ensures type safety - we can't accidentally create a typo label like "NEEDS_REPYL". Max length limits on strings prevent abuse and ensure data fits in our database. The confidence field has explicit min/max to prevent values like -0.5 or 1.5. For internal schemas, including fields like `rawResponse` and `matchedRules` helps with debugging when classifications go wrong. The database schemas use appropriate types and indexes for performance. Having all these schemas documented in one place makes it easy for new developers to understand the data flow.
+Using strict schemas prevents bad data from getting into the system. Setting `additionalProperties: false` catches bugs where the client sends extra fields. Enums for labels prevent typos like "NEEDS_REPYL". Max length limits keep things sane and prevent abuse. The confidence field has min/max validation. For internal schemas, I included extra fields like `rawResponse` and `matchedRules` for debugging. The database schemas are pretty standard - appropriate types, primary keys, timestamps. Everything's documented in one place so new developers can understand the data flow.
 
 ## Chat Log
 
@@ -1326,7 +1341,7 @@ Yeah, index message_id in both tables since you'll be looking up by that. Also i
 - Full email content
 - LLM API responses (except classification result)
 
-**Rationale:** Only send the minimum data needed for classification. This reduces privacy risk and limits exposure if there's a data breach.
+**Rationale:** Only sending what's necessary for classification reduces privacy risk. If there's a data breach, at least we don't have full email content stored anywhere.
 
 ---
 
@@ -1390,7 +1405,6 @@ async def classify_email(
 - Error logs: 90 days
 - User feedback: Indefinite (for model improvement)
 
-
 ---
 
 ## Privacy Compliance
@@ -1422,10 +1436,9 @@ async def classify_email(
 
 ---
 
-
 ## Rationale
 
-Data minimization is the most important principle - we only send what's absolutely necessary to the LLM. This reduces privacy risk and limits damage if there's a breach. Not storing raw email content means even if our database is compromised, user emails aren't exposed. Input validation prevents injection attacks and ensures data integrity. Strict output validation from the LLM prevents malicious or malformed responses from reaching users. Authentication and rate limiting prevent abuse and control costs. Encryption protects data in transit and at rest. Clear logging (without sensitive data) helps us debug issues without creating privacy risks. All of this aligns with privacy-by-design principles and prepares us for regulations like GDPR.
+The main thing is data minimization - only send what's absolutely needed to the LLM. We don't store raw email content anywhere, so even if our database gets hacked, user emails aren't exposed. Input validation prevents injection attacks. Output validation from the LLM makes sure we never show broken data. Authentication and rate limiting prevent abuse. We log performance stuff without logging sensitive data, which helps us debug without creating privacy issues.
 
 ## Chat Log
 
@@ -1628,7 +1641,7 @@ Main thing is transparency - have a clear privacy policy that explains we send e
 
 ## Rationale
 
-The biggest risk to completion is time - one sprint is short for a feature with ML components, API integrations, and a full stack implementation. That's why aggressive scope cutting is essential: just do classification, skip feedback, keep UI minimal. The second biggest risk is external dependencies (LLM API, email provider API) being harder than expected, so we test those first. By starting with integration on day 1, we find blockers early when there's still time to pivot. LLM quota is a known issue, so budgeting for API costs upfront prevents surprises. Having fallback plans (rules-only mode, mock data, pre-cached demo) ensures we can still demo even if something breaks. The key insight is that a working but imperfect feature is better than an ambitious unfinished one.
+Time is the biggest risk because one sprint is really short for building all this. That's why we need to cut scope hard - just do classification, skip feedback, keep the UI minimal. The second biggest risk is that external APIs (LLM, email provider) might be harder to integrate than we think, so we test those on day 1. If we find problems early, we still have time to fix them. LLM quota is a known issue so we budget for it upfront. Having fallback plans (rules-only mode, pre-cached demos) means we can still demo even if something breaks. Better to have a working simple feature than an ambitious broken one.
 
 ## Chat Log
 
@@ -1777,11 +1790,7 @@ US3's `ReplyNeedService` calls US2's `MeetingService` to get the `meetingRelated
 
 ## Rationale for These Modifications
 
-US3 leverages US2's meeting detection to improve reply-need accuracy. For example:
-- If an email is meeting-related AND contains a direct question → higher confidence for NEEDS_REPLY
-- If an email is meeting-related but just informational → might still be NO_REPLY_NEEDED
-
-By exposing the `meetingRelated` field, US2 becomes a dependency that US3 can build upon. This modular approach keeps each feature focused while allowing them to work together.
+US3 uses US2's meeting detection to make better reply-need predictions. For example, if an email is meeting-related AND has a direct question, we're more confident it needs a reply. If it's meeting-related but just informational, it might not need a reply. By adding the `meetingRelated` field to US2's response, US3 can use that information without having to re-run meeting detection. This keeps the features modular - US2 does meeting detection, US3 uses that result for reply classification.
 
 ---
 
@@ -1816,7 +1825,3 @@ Should I update US2's class diagram too?
 
 **Assistant:**
 Yeah, add a method to US2's service class like `getMeetingRelatedStatus()` that US3 can call. This shows that US2 exposes this functionality for other features to use.
-```
-
----
-
