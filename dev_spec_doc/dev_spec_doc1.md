@@ -9,7 +9,7 @@ Sprint fit: Can be delivered as a basic priority flagging feature.
 
 ---
 
-## 目录
+## Table of contents
 - [Header](#header)
 - [Architecture Diagram](#architecture-diagram)
 - [Class Diagram](#class-diagram)

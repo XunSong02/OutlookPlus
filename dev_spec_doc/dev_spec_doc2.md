@@ -8,7 +8,7 @@ Sprint fit: Easily achievable with Gemini-backed intent classification in one sp
 
 ---
 
-## 目录
+## Table of contents
 - [Header](#header)
 - [Architecture Diagram](#architecture-diagram)
 - [Class Diagram](#class-diagram)
