@@ -118,42 +118,46 @@ This section shows where each component runs (client/server/cloud) and what data
 **Mermaid diagram**
 ```mermaid
 flowchart LR
-	subgraph Client[Client: Web App (Browser)]
-		UI[Inbox UI: Badge/Label]
+	subgraph Client
+		Client_T[Client Web App Browser]
+		UI[Inbox UI Badge Label]
 		Web[OutlookPlus Web UI]
 	end
 
-	subgraph CloudMS[Cloud: Microsoft 365]
-		IdP[Entra ID / Microsoft Identity Platform]
+	subgraph CloudMS
+		CloudMS_T[Cloud Microsoft 365]
+		IdP[Entra ID]
 		Graph[Microsoft Graph API]
 	end
 
-	subgraph Server[Server/Cloud: OutlookPlus Services]
+	subgraph Server
+		Server_T[Server OutlookPlus Services]
 		ScoreAPI[Scoring API]
-		Prefs[(User Preferences Store)]
-		Cache[(Score Cache)]
+		Prefs[User Preferences Store]
+		Cache[Score Cache]
 	end
 
-	subgraph LLMCloud[Cloud: LLM Provider]
+	subgraph LLMCloud
+		LLMCloud_T[Cloud LLM Provider]
 		LLM[LLM API]
 	end
 
 	UI <--> Web
 
-	Web -->|OAuth sign-in| IdP
-	IdP -->|Access token| Web
+	Web --> IdP
+	IdP --> Web
 
-	Web -->|Fetch message metadata + body (main text)| Graph
-	Graph -->|Sender/subject/received time/body (main text)/importance| Web
+	Web --> Graph
+	Graph --> Web
 
-	Web -->|Score request (metadata + main text)| ScoreAPI
-	ScoreAPI -->|Read prefs| Prefs
-	ScoreAPI -->|Read/write cache| Cache
-	ScoreAPI -->|Prompt: instructions + schema + features + body| LLM
-	LLM -->|JSON: priorityFlag + reasons[]| ScoreAPI
-	ScoreAPI -->|priorityFlag + reasons| Web
+	Web --> ScoreAPI
+	ScoreAPI --> Prefs
+	ScoreAPI --> Cache
+	ScoreAPI --> LLM
+	LLM --> ScoreAPI
+	ScoreAPI --> Web
 
-	Web -->|Render badge + short explanation| UI
+	Web --> UI
 ```
 
 **Information flows**

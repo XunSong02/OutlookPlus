@@ -650,37 +650,35 @@ Tell me to generate # Flow Chart next.
 
 ```mermaid
 flowchart TD
-	%% Ingestion + Classification
-	A0([Start: IngestionWorker runOnce(userId)]) --> A1[MailboxClient.fetchNewEmails(userId, since)]
-	A1 --> A2{New emails returned?}
-	A2 -- No --> A99([End])
-	A2 -- Yes --> A3[EmailRepository.upsertEmail(email)]
-	A3 --> A4[IcsExtractor.extract(email)]
-	A4 --> A5[PromptBuilder.build(email, ics)]
-	A5 --> A6[GeminiClient.classify(request)]
-	A6 --> A7{Response valid JSON + schema?}
+	A0[Start ingestion worker] --> A1[Fetch new emails]
+	A1 --> A2{Any new emails}
+	A2 -- No --> A99[End]
+	A2 -- Yes --> A3[Store raw email]
+	A3 --> A4[Extract ICS fields]
+	A4 --> A5[Build Gemini request]
+	A5 --> A6[Call Gemini classify]
+	A6 --> A7{Response valid}
 
-	A7 -- Yes --> A8[EmailRepository.upsertClassification(meetingRelated, confidence, rationale, source="gemini", classifiedAt)]
-	A8 --> A9([Classification stored])
+	A7 -- Yes --> A8[Store meeting classification source gemini]
+	A8 --> A9[Classification stored]
 
-	A7 -- No --> A10[Increment retry_count]
-	A10 --> A11{retry_count < 3?}
-	A11 -- Yes --> A12[Wait backoff_delay]
+	A7 -- No --> A10[Increment retry count]
+	A10 --> A11{Retry count less than 3}
+	A11 -- Yes --> A12[Wait backoff delay]
 	A12 --> A6
-	A11 -- No --> A13[Mark classification failed for emailId]
-	A13 --> A14([Leave email without stored classification])
+	A11 -- No --> A13[Mark classification failed]
+	A13 --> A14[No stored classification]
 
-	%% Feed Retrieval
-	B0([Start: User opens feed]) --> B1[Web App calls GET /api/emails with bearer token]
-	B1 --> B2[AuthTokenVerifier.verifyAndGetUserId(token)]
-	B2 --> B3{Token valid?}
+	B0[Start user opens feed] --> B1[Call GET api emails]
+	B1 --> B2[Verify token and user id]
+	B2 --> B3{Token valid}
 	B3 -- No --> B4[Return 401]
-	B3 -- Yes --> B5[EmailRepository.listEmails(userId, limit, cursor)]
-	B5 --> B6[EmailRepository.getClassification(emailId) for each email]
-	B6 --> B7{Classification exists?}
-	B7 -- Yes --> B8[Return FeedItemDTO with meetingRelated, meetingRelatedSource="gemini", confidence]
-	B7 -- No --> B9[Return FeedItemDTO with meetingRelated=false, meetingRelatedSource="gemini", confidence=0.0]
-	B8 --> B10([Feed rendered])
+	B3 -- Yes --> B5[List emails]
+	B5 --> B6[Load classification per email]
+	B6 --> B7{Classification exists}
+	B7 -- Yes --> B8[Return feed with meeting fields]
+	B7 -- No --> B9[Return feed with default meeting fields]
+	B8 --> B10[Feed rendered]
 	B9 --> B10
 ```
 
