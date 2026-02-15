@@ -9,6 +9,22 @@ Sprint fit: Can be delivered as a basic priority flagging feature.
 
 ---
 
+## 目录
+- [Header](#header)
+- [Architecture Diagram](#architecture-diagram)
+- [Class Diagram](#class-diagram)
+- [List of Classes](#list-of-classes)
+- [State Diagrams](#state-diagrams)
+- [Flow Chart](#flow-chart)
+- [Development Risks and Failures](#development-risks-and-failures)
+- [Technology Stack](#technology-stack)
+- [APIs](#apis)
+- [Public Interfaces](#public-interfaces)
+- [Data Schemas](#data-schemas)
+- [Security and Privacy](#security-and-privacy)
+- [Risks to Completion](#risks-to-completion)
+
+---
 # Header
 ## Feature Name
 Immediate-Attention Email Flagging
@@ -232,9 +248,10 @@ classDiagram
 		+getMessageBody(messageId): string
 	}
 
-	class GraphApiClient <<external>> {
+	class GraphApiClient {
 		+get(path, token): any
 	}
+	<<external>> GraphApiClient
 
 	class ScoringApiClient {
 		+scoreEmail(req: ScoreRequest): ScoreResponse
@@ -260,9 +277,10 @@ classDiagram
 		+complete(prompt: LlmPrompt): LlmResult
 	}
 
-	class LlmProviderApi <<external>> {
+	class LlmProviderApi {
 		+chatCompletions(request): any
 	}
+	<<external>> LlmProviderApi
 
 	class LlmResponseParser {
 		+parse(result: LlmResult): PriorityDecision
@@ -617,7 +635,7 @@ flowchart TD
 	J --> K[POST /api/score to backend]
 
 	K --> L{Backend response valid?}
-	L -- No --> M[Mark as Normal + reason: "Unable to score"]
+	L -- No --> M[Mark as Normal + reason: Unable to score]
 	L -- Yes --> N{priorityFlag}
 	N -- High --> O[Render High badge + reasons]
 	N -- Normal --> P[Render Normal (no badge) + optional reasons]
