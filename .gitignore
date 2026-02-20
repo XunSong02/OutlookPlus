@@ -1,0 +1,27 @@
+# Dependencies
+**/node_modules/
+
+# Build outputs
+**/dist/
+**/build/
+**/.next/
+**/.vite/
+
+# Logs
+**/*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env files
+**/.env
+**/.env.*
+
+# OS / editor
+**/.DS_Store
+**/Thumbs.db
+**/.vscode/
+
+# Optional: keep nested repo metadata out of the outer repo
+OutlookPlus/.git/
