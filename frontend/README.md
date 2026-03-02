@@ -3,6 +3,7 @@
 <img width="3839" height="1864" alt="image" src="https://github.com/user-attachments/assets/4fcdee9b-a918-4eb2-9754-49e6a0a011f4" />
 <img width="3839" height="1860" alt="image" src="https://github.com/user-attachments/assets/1a891fe4-4b4e-4c9d-b529-2c9c94c2b8e3" />
 <img width="3833" height="1861" alt="image" src="https://github.com/user-attachments/assets/175bce39-7996-4d3f-857e-df6a2d461675" />
+<img width="3829" height="1843" alt="image" src="https://github.com/user-attachments/assets/81fced5c-91c8-46c6-a06d-9c531cde46e5" />
 
   # AI Email Manager UX
 
