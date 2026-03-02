@@ -1,3 +1,4 @@
+<img width="3827" height="1851" alt="image" src="https://github.com/user-attachments/assets/2295097c-a30b-436a-8d82-f4d6b54fc699" />
 
   # AI Email Manager UX
 
