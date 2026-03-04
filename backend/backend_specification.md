@@ -86,23 +86,23 @@ Both runtimes share:
 
 ```mermaid
 flowchart TB
-	subgraph Client[Client (OutlookPlus Web App)]
+	subgraph Client["Client (OutlookPlus Web App)"]
 		UI[Email Feed + Detail UI]
 	end
 
-	subgraph Backend[OutlookPlus Backend (Single Codebase)]
-		subgraph API[API Runtime (FastAPI)]
-			EmailAPI[EmailApiController\nGET /api/emails\nGET /api/emails/{emailId}]
-			MeetAPI[MeetingApiController\nGET /api/meeting/check]
-			ReplyAPI[ReplyNeedApiController\nPOST /api/reply-need\nPOST /api/reply-need/feedback]
+	subgraph Backend["OutlookPlus Backend (Single Codebase)"]
+		subgraph API["API Runtime (FastAPI)"]
+			EmailAPI["EmailApiController<br/>GET /api/emails<br/>GET /api/emails/{emailId}"]
+			MeetAPI["MeetingApiController<br/>GET /api/meeting/check"]
+			ReplyAPI["ReplyNeedApiController<br/>POST /api/reply-need<br/>POST /api/reply-need/feedback"]
 			Auth[AuthTokenVerifier]
 			ReplySvc[ReplyNeedService]
 			MeetSvc[MeetingService]
 		end
 
-		subgraph Worker[Worker Runtime (Ingestion + US2)]
+		subgraph Worker["Worker Runtime (Ingestion + US2)"]
 			Ingest[IngestionWorker]
-			GraphClient[MailboxClient (MS Graph)]
+			GraphClient["MailboxClient (MS Graph)"]
 			Ics[IcsExtractor]
 			MeetCls[MeetingClassifier]
 		end
