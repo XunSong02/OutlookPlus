@@ -23,5 +23,4 @@ pnpm-debug.log*
 **/Thumbs.db
 **/.vscode/
 
-# Optional: keep nested repo metadata out of the outer repo
 OutlookPlus/.git/
