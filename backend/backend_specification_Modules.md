@@ -313,6 +313,28 @@ from typing import Iterable, Optional, Protocol
 
 
 @dataclass(frozen=True)
+class ParsedEmail:
+	"""Normalized email produced by the MIME parsing step (worker-only input)."""
+
+	subject: Optional[str]
+	from_addr: Optional[str]
+	to_addrs: Optional[str]
+	cc_addrs: Optional[str]
+	sent_at_utc: Optional[str]
+	received_at_utc: str
+	body_text: Optional[str]
+
+
+@dataclass(frozen=True)
+class ParsedAttachment:
+	"""Attachment metadata produced by MIME parsing (bytes are stored by AttachmentFileStore)."""
+
+	filename: Optional[str]
+	content_type: str
+	size_bytes: Optional[int]
+
+
+@dataclass(frozen=True)
 class EmailMessage:
 		id: int
 		user_id: str
@@ -775,34 +797,70 @@ flowchart TB
 
 ```python
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
+
+
+@dataclass(frozen=True)
+class MeetingPromptInput:
+	subject: str | None
+	from_addr: str | None
+	to_addrs: str | None
+	cc_addrs: str | None
+	sent_at_utc: str | None
+	body_prefix: str
+	ics_method: str | None
+	ics_summary: str | None
+	ics_dtstart: str | None
+	ics_dtend: str | None
+	ics_organizer: str | None
+	ics_location: str | None
+
+
+@dataclass(frozen=True)
+class ReplyNeedPromptInput:
+	subject: str | None
+	from_addr: str | None
+	to_addrs: str | None
+	cc_addrs: str | None
+	sent_at_utc: str | None
+	body_prefix: str
+	meeting_related: bool
+	meeting_confidence: float
+
+
+class PromptBuilder:
+	def build_meeting_prompt(self, *, input: MeetingPromptInput) -> str:
+		...
+
+	def build_reply_need_prompt(self, *, input: ReplyNeedPromptInput) -> str:
+		...
 
 
 @dataclass(frozen=True)
 class GeminiResponse:
-		raw_text: str
+    raw_text: str
 
 
 class GeminiError(Exception):
-		pass
+    pass
 
 
 class GeminiClient:
-		def generate_json(self, *, prompt: str) -> GeminiResponse:
-				"""Call Gemini and return raw text. Raises GeminiError on transport/auth errors."""
-				...
+    def generate_json(self, *, prompt: str) -> GeminiResponse:
+        """Call Gemini and return raw text. Raises GeminiError on transport/auth errors."""
+        ...
 
 
 class JsonValidationError(Exception):
-		pass
+    pass
 
 
 class StrictJsonValidator:
-		def validate_meeting(self, *, raw_text: str) -> dict[str, Any]:
-				...
+    def validate_meeting(self, *, raw_text: str) -> dict[str, Any]:
+        ...
 
-		def validate_reply_need(self, *, raw_text: str) -> dict[str, Any]:
-				...
+    def validate_reply_need(self, *, raw_text: str) -> dict[str, Any]:
+        ...
 ```
 
 ### Declarations (Public vs Private)
@@ -905,29 +963,33 @@ from typing import Optional
 
 @dataclass(frozen=True)
 class MeetingStatus:
-		meeting_related: bool
-		confidence: float
-		rationale: Optional[str]
-		source: str
+	meeting_related: bool
+	confidence: float
+	rationale: Optional[str]
+	source: str
 
 
 class MeetingService:
-		def get_status(self, *, user_id: str, email_id: int) -> MeetingStatus:
-				"""Return stored status or safe defaults when absent."""
-				...
+	def get_status(self, *, user_id: str, email_id: int) -> MeetingStatus:
+		"""Return stored status or safe defaults when absent."""
+		...
+
+	def get_status_by_message_id(self, *, user_id: str, mailbox_message_id: str) -> MeetingStatus:
+		"""Resolve messageId -> EmailId using the emails table, then return MeetingStatus."""
+		...
 ```
 
 **REST API (external callers: web app)**
 
-- `GET /api/meeting/check?emailId=<EmailId>`
+- `GET /api/meeting/check?messageId=<MailboxMessageId>`
 	- Auth: Bearer token required
 	- Response 200:
-		- `{ "emailId": 123, "meetingRelated": true, "confidence": 0.87, "rationale": "...", "source": "gemini" }`
+		- `{ "messageId": "...", "meetingRelated": true, "confidence": 0.87, "rationale": "...", "source": "gemini" }`
 	- Response 404: email not found for user
 
 ### Declarations (Public vs Private)
 
-- **Public**: `MeetingClassifier.classify_if_needed`, `MeetingService.get_status`, `MeetingStatus`
+- **Public**: `MeetingClassifier.classify_if_needed`, `MeetingService.get_status`, `MeetingService.get_status_by_message_id`, `MeetingStatus`
 - **Private**: prompt-input extraction helpers, truncation logic, DB upsert SQL
 
 ### Mermaid Class Hierarchy
@@ -939,6 +1001,7 @@ classDiagram
 	}
 	class MeetingService {
 		+get_status(user_id: str, email_id: EmailId) MeetingStatus
+		+get_status_by_message_id(user_id: str, mailbox_message_id: str) MeetingStatus
 	}
 	class MeetingStatus {
 		+meeting_related: bool
@@ -961,8 +1024,8 @@ classDiagram
 
 **Can do**
 
-- On-demand reply-needed classification by `emailId`.
-- Cache results in SQLite by `(userId, emailId)`.
+- On-demand reply-needed classification by `messageId`.
+- Cache results in SQLite by `(userId, messageId)` (implemented as a lookup/join via the `emails` table, since classifications are stored by `email_id`).
 - Reuse US2 meeting signal through `MeetingService`.
 - Accept user feedback and store it for later evaluation.
 - Deterministic failure behavior returning `UNSURE` (see architecture).
@@ -1003,13 +1066,13 @@ flowchart TB
 **Senior-architect justification**
 
 - On-demand classification controls cost and keeps browsing fast.
-- Caching by `(userId, emailId)` eliminates repeat Gemini calls.
+- Caching by `(userId, messageId)` eliminates repeat Gemini calls.
 - Deterministic fallback behavior makes the system testable and reliable under LLM failures.
 
 ### Data Abstraction
 
 - **ADT**: `ReplyNeedService`
-- **Abstract state**: mapping `(user_id, email_id) -> ReplyNeedResult`, plus a set of feedback records.
+- **Abstract state**: mapping `(user_id, mailbox_message_id) -> ReplyNeedResult`, plus a set of feedback records.
 - **Rep**: rows in `reply_need_classifications` and `reply_need_feedback`.
 - **Rep invariant**: at most one classification per `(user_id, email_id)`; reasons list size 1..3 encoded in `reasons_json`.
 
@@ -1027,13 +1090,13 @@ flowchart TB
 
 - `POST /api/reply-need`
 	- Auth: Bearer token required
-	- Request: `{ "emailId": 123 }`
+	- Request: `{ "messageId": "..." }`
 	- Response 200:
-		- `{ "emailId": 123, "label": "NEEDS_REPLY", "confidence": 0.78, "reasons": ["..."], "source": "gemini" }`
+		- `{ "messageId": "...", "label": "NEEDS_REPLY", "confidence": 0.78, "reasons": ["..."], "source": "gemini" }`
 
 - `POST /api/reply-need/feedback`
 	- Auth: Bearer token required
-	- Request: `{ "emailId": 123, "userLabel": "NO_REPLY_NEEDED", "comment": "optional" }`
+	- Request: `{ "messageId": "...", "userLabel": "NO_REPLY_NEEDED", "comment": "optional" }`
 	- Response 204: stored
 
 **Internal (service) API**
@@ -1048,18 +1111,18 @@ ReplyNeedLabel = Literal["NEEDS_REPLY", "NO_REPLY_NEEDED", "UNSURE"]
 
 @dataclass(frozen=True)
 class ReplyNeedResult:
-		label: ReplyNeedLabel
-		confidence: float
-		reasons: list[str]
-		source: str
+    label: ReplyNeedLabel
+    confidence: float
+    reasons: list[str]
+    source: str
 
 
 class ReplyNeedService:
-		def classify(self, *, user_id: str, email_id: int) -> ReplyNeedResult:
-				...
+    def classify(self, *, user_id: str, mailbox_message_id: str) -> ReplyNeedResult:
+        ...
 
-		def submit_feedback(self, *, user_id: str, email_id: int, user_label: Literal["NEEDS_REPLY", "NO_REPLY_NEEDED"], comment: str | None) -> None:
-				...
+    def submit_feedback(self, *, user_id: str, mailbox_message_id: str, user_label: Literal["NEEDS_REPLY", "NO_REPLY_NEEDED"], comment: str | None) -> None:
+        ...
 ```
 
 ### Declarations (Public vs Private)
@@ -1072,8 +1135,8 @@ class ReplyNeedService:
 ```mermaid
 classDiagram
 	class ReplyNeedService {
-		+classify(user_id: str, email_id: EmailId) ReplyNeedResult
-		+submit_feedback(user_id: str, email_id: EmailId, user_label: str, comment: str?) None
+		+classify(user_id: str, mailbox_message_id: str) ReplyNeedResult
+		+submit_feedback(user_id: str, mailbox_message_id: str, user_label: str, comment: str?) None
 	}
 	class ReplyNeedResult {
 		+label: str
