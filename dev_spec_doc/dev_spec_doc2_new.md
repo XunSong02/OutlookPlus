@@ -15,7 +15,7 @@ Sprint fit: Easily achievable with Gemini-backed intent classification in one sp
 
 This spec (US2) and US3 (Reply Needed Suggestion) assume a single shared backend:
 - One FastAPI backend that serves `/api/emails`, `/api/meeting/*`, and `/api/reply-need/*`.
-- One mailbox ingestion worker that fetches mail via Microsoft Graph and persists normalized email data.
+- One mailbox integration that fetches mail via IMAP and supports outbound mail via SMTP submission.
 - One Gemini-backed classification client reused for both meeting detection (US2) and reply-need classification (US3).
 - One SQLite3 database for all structured data (emails, classifications, feedback).
 
@@ -889,10 +889,10 @@ Say “generate # Technology Stack” next.
 - Response Format: strict JSON object with keys `meetingRelated`, `confidence`, `rationale`
 
 ## Mailbox Integration
-- Provider: Microsoft Graph API (Outlook/Office 365)
-- Auth: OAuth 2.0 Authorization Code flow
-- Token Library: MSAL (Python)
-- Permissions: `Mail.Read` for ingestion
+- Provider: IMAP4rev1 + SMTP submission (mailbox connectivity)
+- Auth: App Password
+- IMAP Transport: TLS on port 993
+- SMTP Transport: STARTTLS on port 587
 
 ## Persistence (SQLite3 + Attachment Files)
 - Database: SQLite3
@@ -922,14 +922,17 @@ Say “generate # Technology Stack” next.
 - Secrets and endpoints stored in environment variables:
 	- `GEMINI_API_KEY`
 	- `GEMINI_MODEL`
-	- `GRAPH_TENANT_ID`
-	- `GRAPH_CLIENT_ID`
-	- `GRAPH_CLIENT_SECRET`
+	- `MAIL_USERNAME`
+	- `MAIL_APP_PASSWORD`
+	- `MAIL_IMAP_HOST`
+	- `MAIL_IMAP_PORT` (default: `993`)
+	- `MAIL_SMTP_HOST`
+	- `MAIL_SMTP_PORT` (default: `587`)
 	- `APP_BASE_URL`
 	- `SQLITE_DB_PATH` (default: `data/outlookplus.db`)
 	- `DATA_DIR` (default: `data/`, used for attachment file storage)
 ## Rationale
-The LLM-generated design chose Python and FastAPI to keep asynchronous ingestion simple while reducing boilerplate code. For the MVP, this harmonized backend uses SQLite3 (WAL mode) to persist emails and classifications so US2 and US3 can share one storage layer. Since the system is positioned as an upgraded version of Outlook, it integrates Microsoft Graph for mailbox connectivity.
+The LLM-generated design chose Python and FastAPI to keep asynchronous ingestion simple while reducing boilerplate code. For the MVP, this harmonized backend uses SQLite3 (WAL mode) to persist emails and classifications so US2 and US3 can share one storage layer. Since the system is positioned as an upgraded version of Outlook, it integrates standards-based IMAP/SMTP for mailbox connectivity.
 ## Chat Log
 > Chat Log is historical; it may reference earlier, non-authoritative storage choices.
 generate
@@ -945,15 +948,15 @@ Python + FastAPI
 Which database should the spec standardize on for persisting emails and classifications?
 SQLite3
 Which mailbox provider integration should the spec target for ingestion?
-Microsoft Graph API (Outlook/Office 365)
-- OAuth + Graph mail endpoints
-I’ve got your choices: backend = Python/FastAPI, mailbox = Microsoft Graph. Next I’ll quickly check the existing frontend code in this workspace to keep the Technology Stack consistent, then I’ll write the full # Technology Stack section.
+IMAP4rev1 + SMTP submission
+- App Password + IMAP/SMTP
+I’ve got your choices: backend = Python/FastAPI, mailbox = IMAP/SMTP. Next I’ll quickly check the existing frontend code in this workspace to keep the Technology Stack consistent, then I’ll write the full # Technology Stack section.
 
 Generated # Technology Stack in dev_spec_doc2.md using your selected approach:
 
 Frontend: Next.js 16.1.4 + React 19.2.3 + TypeScript 5 + Tailwind 4 + ESLint 9
 Backend: Python 3.12 + FastAPI + Uvicorn + Pydantic v2 + httpx + tenacity
-Integrations: Microsoft Graph API ingestion, Gemini API via REST
+Integrations: IMAP ingestion, Gemini API via REST
 Storage: SQLite3 database file under `data/outlookplus.db` plus attachment files under `data/attachments/`
 Observability + required environment variables listed concretely
 Say “generate # APIs” next.
@@ -1057,32 +1060,45 @@ Say “generate # APIs” next.
 	- `401 Unauthorized`
 	- `429 Too Many Requests`: ingestion requests exceed rate limit for the user
 
-## Backend ↔ Microsoft Graph (Mailbox Ingestion)
+## Backend ↔ IMAP4rev1 (Mailbox Ingestion)
 
-### OAuth Token (MSAL)
-- Authority: `https://login.microsoftonline.com/{tenantId}`
-- Grant Type: Authorization Code (interactive login initiated from frontend)
-- Scopes: `Mail.Read`
+### Authentication (App Password)
+- Mechanism: IMAP `LOGIN` with per-user mailbox credentials: `MAIL_USERNAME` + `MAIL_APP_PASSWORD`.
+- Secret handling: The backend never logs mailbox credentials.
 
-### Fetch Messages
-- Method: `GET https://graph.microsoft.com/v1.0/me/messages`
-- Headers:
-	- `Authorization: Bearer <graph_access_token>`
-- Query:
-	- `$top=50`
-	- `$orderby=receivedDateTime desc`
-	- `$select=id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments`
-	- `$filter=receivedDateTime ge <since>`
+### Fetch Messages (IMAP)
+- Transport: IMAPS (TLS) on port 993.
+- Commands (concrete protocol steps):
+	1. `CAPABILITY`
+	2. `LOGIN <username> <app_password>`
+	3. `SELECT INBOX`
+	4. `UID SEARCH SINCE <since-date>`
+	5. For each UID: `UID FETCH <uid> (ENVELOPE INTERNALDATE BODYSTRUCTURE BODY.PEEK[TEXT])`
 - Output Mapping:
-	- Graph `id` → `EmailMessage.id`
-	- Graph `body.content` (HTML or text) → backend converts to plain text → `EmailMessage.bodyText`
+	- `UID` → `EmailMessage.id` (normalized into a stable string within the user scope)
+	- `ENVELOPE.Subject` → `EmailMessage.subject`
+	- `ENVELOPE.From` → `EmailMessage.from`
+	- `ENVELOPE.To` / `ENVELOPE.Cc` → `EmailMessage.to` / `EmailMessage.cc`
+	- `INTERNALDATE` → `EmailMessage.sentAt`
+	- `BODY.PEEK[TEXT]` (may be plain text or HTML) → backend converts to plain text → `EmailMessage.bodyText`
 
-### Fetch Attachments
-- Method: `GET https://graph.microsoft.com/v1.0/me/messages/{messageId}/attachments`
-- Headers:
-	- `Authorization: Bearer <graph_access_token>`
+### Fetch Calendar Attachments (IMAP)
+- Discovery: parse `BODYSTRUCTURE` to find MIME parts with `Content-Type: text/calendar`.
+- Retrieval:
+	- Fetch part bytes with `UID FETCH <uid> (BODY.PEEK[<partNumber>])`.
 - Filter Rule:
-	- Persist only attachments with `contentType == "text/calendar"` and `contentBytes` present.
+	- Persist only parts where parsed MIME type equals `text/calendar`.
+
+## Backend ↔ SMTP Submission (Outbound Mail Capability)
+
+### Authentication (App Password)
+- Mechanism: SMTP AUTH using per-user `MAIL_USERNAME` + `MAIL_APP_PASSWORD`.
+
+### Transport
+- SMTP submission over STARTTLS/TLS on port 587.
+
+### MVP Note
+- SMTP is required as part of the shared mailbox integration, but US2 does not define any user-facing outbound-mail flows.
 
 ## Backend ↔ Gemini API (Meeting Classification)
 
@@ -1106,24 +1122,24 @@ Say “generate # APIs” next.
 	- `confidence` is float in range `0.0` to `1.0`
 	- `rationale` is a non-empty string
 ## Rationale
-The LLM generated REST endpoints for feed and detail views. OAuth through Microsoft Graph handles mailbox authentication securely. I think the strict JSON schema validation catches Gemini errors before they cause problems downstream. Rate limiting prevents quota overruns which keeps costs predictable.
+The LLM generated REST endpoints for feed and detail views. IMAP ingestion with App Password keeps mailbox connectivity simple for the sprint. I think the strict JSON schema validation catches Gemini errors before they cause problems downstream. Rate limiting prevents quota overruns which keeps costs predictable.
 ## Chat Log
 generate APIs
 
-I’m going to read the file around # APIs, then replace that placeholder with a concrete REST API contract for the web app plus the exact external API calls the backend makes to Microsoft Graph and Gemini.
+I’m going to read the file around # APIs, then replace that placeholder with a concrete REST API contract for the web app plus the exact external API details the backend uses for IMAP ingestion and Gemini classification.
 
 Done
 
 Generated the # APIs section in dev_spec_doc2.md.
 Defined concrete internal REST endpoints (GET /api/emails, GET /api/emails/{emailId}, POST /api/ingestion/run) with exact request/response JSON and error codes.
-Specified the exact Microsoft Graph endpoints used for ingestion and the Gemini API call + strict output schema validation.
+Specified the exact IMAP ingestion protocol steps and the Gemini API call + strict output schema validation.
 Say “generate # Public Interfaces” next.
 # Public Interfaces
 
 ## Backend Module Boundaries
 - `api/`: FastAPI routers and request/response models
 - `services/`: ingestion and classification orchestration
-- `clients/`: Microsoft Graph and Gemini HTTP clients
+- `clients/`: IMAP/SMTP client and Gemini HTTP client
 - `storage/`: SQLite3 persistence for emails, attachments, and classifications (attachment bytes may be stored on disk)
 
 ## FastAPI Public Surface
@@ -1177,14 +1193,14 @@ class AuthTokenVerifier:
 		raise NotImplementedError
 ```
 
-### `MailboxClient` (Microsoft Graph)
+### `MailboxClient` (IMAP4rev1)
 ```python
 from datetime import datetime
 from typing import List
 
 class MailboxClient:
 	async def fetch_new_emails(self, user_id: str, since: datetime) -> List["EmailMessage"]:
-		"""Returns newest-first emails fetched from Microsoft Graph for the user."""
+		"""Returns newest-first emails fetched via IMAP for the user."""
 		raise NotImplementedError
 
 	async def fetch_calendar_attachments(self, user_id: str, message_id: str) -> List["EmailAttachment"]:
@@ -1299,7 +1315,7 @@ Say “generate # Data Schemas” next.
 	"$id": "outlookplus://schemas/EmailMessage.json",
 	"type": "object",
 	"additionalProperties": false,
-	"required": ["id", "subject", "from", "to", "cc", "sentAt", "bodyText", "attachmentIds"],
+	"required": ["id", "subject", "from", "to", "cc", "sentAt", "bodyText", "attachmentIds", "source", "providerMessageId"],
 	"properties": {
 		"id": {"type": "string", "minLength": 1},
 		"subject": {"type": "string"},
@@ -1309,8 +1325,8 @@ Say “generate # Data Schemas” next.
 		"sentAt": {"type": "string", "format": "date-time"},
 		"bodyText": {"type": "string"},
 		"attachmentIds": {"type": "array", "items": {"type": "string"}, "minItems": 0},
-		"source": {"type": "string", "const": "microsoft_graph"},
-		"graphMessageId": {"type": "string", "minLength": 1}
+		"source": {"type": "string", "const": "imap"},
+		"providerMessageId": {"type": "string", "minLength": 1}
 	}
 }
 ```
@@ -1374,7 +1390,7 @@ CREATE TABLE IF NOT EXISTS emails (
   cc_json TEXT NOT NULL,
   sent_at TEXT NOT NULL,
   body_text TEXT NOT NULL,
-  source TEXT NOT NULL CHECK (source IN ('microsoft_graph')),
+	source TEXT NOT NULL CHECK (source IN ('imap')),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   PRIMARY KEY (user_id, message_id)
 );
@@ -1618,18 +1634,18 @@ Want me to generate the next section: # Security and Privacy?
 
 ## Authentication (Frontend ↔ Backend)
 - All endpoints under `/api/*` require `Authorization: Bearer <access_token>`.
-- Token format: Microsoft Entra ID (Azure AD) JWT access token.
+- Token format: JWT access token.
 - Backend validation (performed by `AuthTokenVerifier.verify_and_get_user_id`):
-	- Verify JWT signature using Entra JWKS.
-	- Verify `iss` equals `https://login.microsoftonline.com/{tenantId}/v2.0`.
-	- Verify `aud` equals the OutlookPlus API Application ID URI.
+	- Verify JWT signature using a backend-configured verification key.
+	- Verify `aud` equals the OutlookPlus API audience.
 	- Verify `exp` is in the future (clock skew tolerance: 120 seconds).
-	- Extract stable `user_id` from `oid` claim.
+	- Extract stable `user_id` from `sub` claim.
 - Authorization rule: every storage path and query is scoped by this `user_id`.
 
 ## Transport Security
 - Frontend-to-backend traffic uses HTTPS only.
-- Backend-to-Microsoft Graph and backend-to-Gemini traffic uses HTTPS only.
+- Backend-to-mailbox traffic uses IMAPS (TLS) only.
+- Backend-to-Gemini traffic uses HTTPS only.
 - Backend rejects requests over plain HTTP in non-local environments.
 
 ## Data Minimization (Backend ↔ Gemini)
@@ -1640,7 +1656,7 @@ Want me to generate the next section: # Security and Privacy?
 - Gemini never receives:
 	- Full email body beyond 2,000 characters
 	- Any binary attachment bytes
-	- OAuth tokens, cookies, or Authorization headers
+	- Mailbox credentials (including App Passwords), cookies, or Authorization headers
 - Backend does not persist Gemini prompts; it persists only the validated `MeetingClassification` output.
 
 ## Storage Security (SQLite3 + Attachment Files)
@@ -1679,11 +1695,11 @@ Want me to generate the next section: # Security and Privacy?
 	- `bodyText`
 	- `bodyPrefix2000`
 	- Raw ICS text
-	- OAuth tokens or Authorization headers
+	- Mailbox credentials (including App Passwords) or Authorization headers
 - Logs include only:
 	- `requestId`, `userId`, `messageId`
 	- classification result: `meetingRelated`, `confidence`, `source="gemini"`
-	- latency and retry counts for Graph and Gemini calls
+	- latency and retry counts for IMAP and Gemini calls
 - Error responses:
 	- `401` for auth failures
 	- `404` for missing email within the authenticated user scope
@@ -1693,9 +1709,8 @@ Want me to generate the next section: # Security and Privacy?
 ## Secrets Management
 - Secrets are provided via environment variables on the backend host:
 	- `GEMINI_API_KEY`
-	- `GRAPH_TENANT_ID`
-	- `GRAPH_CLIENT_ID`
-	- `GRAPH_CLIENT_SECRET`
+	- `MAIL_USERNAME`
+	- `MAIL_APP_PASSWORD`
 - Secrets are not stored in repo, the SQLite database, or logs.
 
 ## Rate Limiting
@@ -1725,7 +1740,7 @@ Attachment deletion:
 - Select orphaned `email_attachments.storage_path` values (or attachments whose parent email is deleted) and delete those files from disk.
 
 ## Rationale
-The LLM generated security controls for auth, transport, and data minimization. I think validating JWT claims (`iss`, `aud`, `exp`, `oid`) prevents token misuse and the user-scoped storage paths prevent cross-user data leaks. Sending only 2,000 characters to Gemini reduces privacy exposure. The 30-day retention with daily cleanup keeps storage costs manageable without making the privacy policy too complex.
+The LLM generated security controls for auth, transport, and data minimization. I think validating JWT claims (`aud`, `exp`, `sub`) prevents token misuse and the user-scoped storage paths prevent cross-user data leaks. Sending only 2,000 characters to Gemini reduces privacy exposure. The 30-day retention with daily cleanup keeps storage costs manageable without making the privacy policy too complex.
 
 ## Chat Log
 > Chat Log is historical; it may reference earlier, non-authoritative JSON-store details.
@@ -1733,13 +1748,13 @@ generate the next section: # Security and Privacy
 
 I’ll first re-open the current # Security and Privacy placeholder in your spec (since it was edited externally), then I’ll replace only that section with a concrete, Gemini-only security/privacy spec that matches your existing APIs and JSON storage.
 
-Added a complete # Security and Privacy section to dev_spec_doc2.md, covering Entra JWT auth validation, HTTPS-only transport, Gemini data minimization, JSON-store protections (ID regex + ACLs), logging redaction rules, secrets via env vars, rate limiting, and a 30-day retention/deletion policy.
+Added a complete # Security and Privacy section to dev_spec_doc2.md, covering JWT auth validation, HTTPS-only transport, Gemini data minimization, JSON-store protections (ID regex + ACLs), logging redaction rules, secrets via env vars, rate limiting, and a 30-day retention/deletion policy.
 
 Say “generate # Risks to Completion” when ready.
 # Risks to Completion
 
 ## Completion Definition (Exit Criteria)
-- Backend can ingest emails for one authenticated user via Microsoft Graph and persist email rows in SQLite3.
+- Backend can ingest emails for one authenticated user via IMAP and persist email rows in SQLite3.
 - Backend can classify each ingested email via Gemini and persist one `MeetingClassification` per email with `source="gemini"`.
 - `GET /api/emails` returns items including `meetingRelated`, `meetingRelatedSource="gemini"`, and `meetingRelatedConfidence`.
 - `GET /api/emails/{emailId}` returns `meetingRelatedRationale` and matches the persisted classification.
@@ -1747,21 +1762,21 @@ Say “generate # Risks to Completion” when ready.
 
 ## Risks
 
-### RC-1: Microsoft Graph app registration and permissions are not approved in time
-- Cause: Tenant admin consent for `Mail.Read` is delayed or blocked.
+### RC-1: Mailbox App Password is unavailable or blocked
+- Cause: The mailbox provider requires 2FA before issuing an App Password, or the provider disables App Passwords for the account.
 - Impact: Ingestion cannot be tested end-to-end; project cannot demonstrate real mailbox connectivity.
 - Mitigation:
-	- Create the Entra app registration on Day 1 and request admin consent immediately.
-	- Implement a stub `MailboxClient` that reads a fixed JSON fixture set to allow backend development without Graph.
-	- Define a test user mailbox in the tenant for controlled evaluation.
+	- Set up a dedicated test mailbox account with App Password enabled on Day 1.
+	- Implement a stub `MailboxClient` that reads a fixed fixture set to allow backend development without a live mailbox.
+	- Define a controlled test mailbox (small inbox) for evaluation.
 - Owner: Backend
 
 ### RC-2: Token validation and user identity mapping are incorrect
-- Cause: `AuthTokenVerifier` accepts wrong `aud/iss` or uses an unstable user identifier.
+- Cause: `AuthTokenVerifier` accepts wrong `aud` or uses an unstable user identifier.
 - Impact: Security failure or cross-user data leakage via incorrect DB query scoping.
 - Mitigation:
-	- Validate `iss`, `aud`, signature, and `exp` exactly as specified in Security and Privacy.
-	- Use `oid` as `user_id` and scope all DB reads/writes by that value.
+	- Validate `aud`, signature, and `exp` exactly as specified in Security and Privacy.
+	- Use `sub` as `user_id` and scope all DB reads/writes by that value.
 	- Add a negative test checklist: invalid signature, wrong audience, expired token.
 - Owner: Backend
 
@@ -1819,7 +1834,7 @@ Say “generate # Risks to Completion” when ready.
 - Owner: Backend
 
 ## Rationale
-There is nothing wrong with these delivery risks generated by the LLM. They mainly focus on Graph permissions, Gemini reliability, and token validation. I think the stub approach of MailboxClient is reasonable. Because in this case, even if admin consent is delayed, backend development can still move forward. SQLite transactions/WAL plus atomic attachment writes reduce the risk of storage corruption.
+There is nothing wrong with these delivery risks generated by the LLM. They mainly focus on mailbox connectivity, Gemini reliability, and token validation. I think the stub approach of MailboxClient is reasonable. Because in this case, even if mailbox credential setup is delayed, backend development can still move forward. SQLite transactions/WAL plus atomic attachment writes reduce the risk of storage corruption.
 ## Chat Log
 > Chat Log is historical; it may reference earlier, non-authoritative JSON file store risks.
 generate # Risks to Completion” when ready
@@ -1829,4 +1844,4 @@ I’m going to re-open the current # Risks to Completion area (since the file wa
 Generated and inserted a complete # Risks to Completion section in dev_spec_doc2.md, including:
 
 Concrete exit criteria (what “done” means for this user story)
-RC-1 … RC-8 risks with cause/impact/mitigation/owner, focused on Graph consent, auth correctness, Gemini strict-JSON reliability, quota/cost, JSON-store concurrency, classification quality, privacy debugging limits, and env/config drift
+RC-1 … RC-8 risks with cause/impact/mitigation/owner, focused on mailbox credential readiness, auth correctness, Gemini strict-JSON reliability, quota/cost, JSON-store concurrency, classification quality, privacy debugging limits, and env/config drift

@@ -13,7 +13,7 @@ Sprint fit: Works well as a lightweight classification task in one sprint
 
 US3 shares a single backend with US2:
 - One FastAPI backend that serves `/api/emails`, `/api/meeting/*`, and `/api/reply-need/*`.
-- One mailbox ingestion worker that fetches mail via Microsoft Graph and persists normalized email data.
+- One mailbox ingestion worker that fetches mail via IMAP and persists normalized email data.
 - One Gemini client reused for both meeting detection (US2) and reply-need classification (US3).
 - One SQLite3 database for all structured data (emails, classifications, feedback).
 
@@ -37,7 +37,7 @@ Storage Layer:
 **REVISED**
 ```md
 Cloud (External Services):
-- Microsoft Graph API: ingestion only (not called by the browser)
+- IMAP/SMTP: mailbox ingestion (server-side only) and outbound mail capability
 - Gemini API: reply-need classification
 
 Storage Layer:
@@ -134,7 +134,7 @@ The three-label system keeps the feature lightweight and safe. By including UNSU
 - EmailRepository/ReplyNeedRepository: read/write SQLite3
 
 **Cloud (External Services):**
-- Microsoft Graph API: mailbox ingestion (server-side only)
+- IMAP/SMTP servers: mailbox ingestion (server-side only) and outbound mail capability
 - Gemini API: reply-need classification (server-side only)
 
 **Storage Layer:**
@@ -175,7 +175,7 @@ flowchart TB
   end
 
   subgraph External["External Services"]
-    Graph[Microsoft Graph API]
+    ImapSmtp["IMAP/SMTP Servers"]
     GeminiApi[Gemini API]
   end
 
@@ -195,7 +195,7 @@ flowchart TB
   Validator --> ReplyApi
   ReplyApi --> Display
 
-  Graph -.->|Ingestion (server-side)| DB
+  ImapSmtp -.->|Ingestion (server-side)| DB
 ```
 
 ## Rationale
@@ -698,8 +698,9 @@ That's why we have rules as a fallback. If the LLM API is unreachable, we just u
 - Response Format: strict JSON object with keys `replyNeededLabel`, `confidence`, `reasons`
 
 ## Mailbox Integration (Shared with US2)
-- Provider: Microsoft Graph API (Outlook/Office 365)
-- Permissions: `Mail.Read` for ingestion
+- Protocols: IMAP (ingestion) + SMTP (outbound mail capability)
+- Transport Security: IMAPS (TLS) and SMTP submission over STARTTLS/TLS
+- Authentication: App Password
 
 ## Persistence
 - SQLite3 database file: `data/outlookplus.db`
@@ -1279,7 +1280,7 @@ Yeah, index message_id in both tables since you'll be looking up by that. Also i
 - Attachment content
 
 ### What We DO NOT Store:
-- Raw mailbox provider payloads (Graph raw JSON)
+- Raw mailbox provider payloads (raw IMAP FETCH responses)
 - Full HTML bodies (store normalized plain-text only)
 - Full email headers
 - LLM raw responses (store only parsed classification fields)
@@ -1444,15 +1445,15 @@ Main thing is transparency - have a clear privacy policy that explains we send e
 - Test with a few manual API calls before building the full system
 
 ### 2. Email Provider Integration Complexity
-**Risk:** Mailbox ingestion/auth (Microsoft Graph) may be incomplete or unstable.
+**Risk:** Mailbox ingestion/auth (IMAP/SMTP) may be incomplete or unstable.
 
 **Impact:** High - can't classify without email access
 
 **Likelihood:** Medium
 
 **Mitigation:**
-- Reuse US2’s Microsoft Graph integration and ingestion worker
-- For MVP testing, use seeded test emails in the SQLite DB if Graph auth is not ready
+- Reuse US2’s IMAP ingestion client and ingestion worker
+- For MVP testing, use seeded test emails in the SQLite DB if mailbox auth is not ready
 
 ### 3. US2 Dependency Not Ready
 **Risk:** Meeting classification results (US2) are missing for some emails, reducing reply-need accuracy.
@@ -1566,7 +1567,7 @@ Main thing is transparency - have a clear privacy policy that explains we send e
 
 **Must Address Before Sprint Starts:**
 1. Confirm LLM API access and test basic integration
-2. Understand email provider OAuth requirements
+2. Set up test mailbox App Password for IMAP/SMTP
 3. Set clear MVP scope boundaries
 
 **Monitor During Sprint:**
@@ -1602,7 +1603,7 @@ Time is the biggest one. One sprint is only like 2 weeks and you have to build:
 That's a lot. Other risks:
 - LLM API might be hard to integrate
 - We might run out of API quota during testing
-- Email OAuth might be complicated
+- Mailbox App Password setup might be delayed or blocked
 - Classification accuracy might be bad
 
 **User:**

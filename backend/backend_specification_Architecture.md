@@ -4,14 +4,14 @@
 
 ### Objective
 Deliver one backend system that:
-- Ingests emails server-side from Microsoft Graph.
+- Ingests emails server-side from IMAP4rev1 and sends outbound mail via SMTP submission.
 - Classifies meeting-related intent (US2) at ingestion time using Gemini.
 - Classifies reply-needed intent (US3) on-demand using Gemini, reusing US2’s meeting signal.
 - Persists all emails, classifications, and feedback in one SQLite3 database.
 - Exposes a single REST surface to the web app.
 
 ### System Boundary
-The backend is the only component that calls external services (Microsoft Graph and Gemini). The browser never calls Microsoft Graph or Gemini.
+The backend is the only component that calls external services (IMAP, SMTP, and Gemini). The browser never calls IMAP, SMTP, or Gemini.
 
 ### Runtime Topology (Single Unified Backend)
 The backend runs the same codebase in two concrete runtimes:
@@ -24,7 +24,7 @@ The backend runs the same codebase in two concrete runtimes:
 	 - Never blocks request threads on mailbox ingestion.
 
 2. **Ingestion + Meeting-Classification Worker Runtime**
-	 - Fetches new messages and relevant attachments from Microsoft Graph.
+	 - Fetches new messages and relevant attachments from the mailbox via IMAP.
 	 - Normalizes and persists `EmailMessage` rows and attachment metadata.
 	 - Executes meeting-related classification exactly once per ingested email id.
 	 - Persists meeting classification output (`meetingRelated`, `confidence`, `rationale`, `source="gemini"`).
@@ -47,14 +47,18 @@ Both runtimes share:
 	- Attachments (metadata + file paths; bytes stored on disk)
 	- Meeting classifications (US2)
 	- Reply-need classifications and user feedback (US3)
-	- Ingestion state (per-user cursor/delta token)
+	- Ingestion state (per-user last-seen IMAP UID + UIDVALIDITY)
 - All writes run inside transactions.
 - Attachment bytes are written under a file lock to prevent partial files.
 
 **Ingestion Pipeline (Worker Runtime)**
-- `MailboxClient` calls Microsoft Graph using per-user Graph tokens.
+- `MailboxClient` connects to the mailbox using IMAPS (TLS) and authenticates using a per-user App Password.
 - `IngestionWorker` fetches new messages, persists each email, downloads attachments with `contentType == "text/calendar"`, and then triggers meeting classification.
 - `IcsExtractor` parses the first `text/calendar` attachment and extracts `METHOD`, `SUMMARY`, `DTSTART`, `DTEND`, `ORGANIZER`, `LOCATION`.
+
+**Outbound Mail Capability (Shared Backend)**
+- `SmtpClient` connects to the mailbox SMTP submission endpoint and authenticates using a per-user App Password.
+- SMTP is required as part of the shared mailbox integration, even though US2/US3 do not define automatic sending in MVP scope.
 
 **Meeting Detection (US2, Worker Runtime)**
 - `MeetingClassifier` builds a structured Gemini request using:
@@ -102,9 +106,13 @@ flowchart TB
 
 		subgraph Worker["Worker Runtime (Ingestion + US2)"]
 			Ingest[IngestionWorker]
-			GraphClient["MailboxClient (MS Graph)"]
+			MailClient["MailboxClient (IMAP4rev1)"]
 			Ics[IcsExtractor]
 			MeetCls[MeetingClassifier]
+		end
+
+		subgraph MailOut["Outbound Mail (SMTP Submission)"]
+			SmtpClient["SmtpClient (SMTP submission)"]
 		end
 
 		subgraph Shared[Shared Libraries]
@@ -121,7 +129,8 @@ flowchart TB
 	end
 
 	subgraph External[External Services]
-		Graph[Microsoft Graph API]
+		Imap[Mailbox Server (IMAP)]
+		Smtp[Mailbox Server (SMTP)]
 		GemAPI[Gemini API]
 	end
 
@@ -145,8 +154,9 @@ flowchart TB
 	ReplySvc --> Validate
 
 	%% Worker pipeline
-	Ingest --> GraphClient
-	GraphClient -->|HTTPS| Graph
+	Ingest --> MailClient
+	MailClient -->|IMAPS (TLS)| Imap
+	SmtpClient -->|SMTP submission (STARTTLS/TLS)| Smtp
 	Ingest --> DB
 	Ingest --> Files
 	Ingest --> Ics
@@ -159,16 +169,16 @@ flowchart TB
 
 	%% Cross-cutting
 	Throttle --- Gemini
-	Throttle --- GraphClient
+	Throttle --- MailClient
 ```
 
 ### Design Justification (Senior Architect View)
 
 1. **Single security boundary for sensitive data**
-	 - Email content and classifications traverse only one trust boundary (browser → backend). Microsoft Graph and Gemini remain strictly server-side, aligning with NFRs that prohibit frontend LLM calls and reduce credential exposure.
+	 - Email content and classifications traverse only one trust boundary (browser → backend). IMAP, SMTP, and Gemini remain strictly server-side, aligning with NFRs that prohibit frontend LLM calls and reduce credential exposure.
 
 2. **Two runtimes, one codebase: isolates latency and failure domains**
-	 - Ingestion and meeting classification execute outside the request path, so feed and detail endpoints remain stable under Graph slowness, Gemini slowness, or Gemini retries. This directly protects UX while preserving a unified architecture.
+	 - Ingestion and meeting classification execute outside the request path, so feed and detail endpoints remain stable under IMAP slowness, Gemini slowness, or Gemini retries. This directly protects UX while preserving a unified architecture.
 
 3. **US2 at ingestion time; US3 on-demand: performance and cost are explicit**
 	 - Meeting detection runs once per new email id so the feed returns `meetingRelated` without triggering Gemini during browsing.
