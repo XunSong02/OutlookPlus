@@ -16,6 +16,12 @@ Deliver one backend system that supports the UI contract implemented in the fron
 - Support “Suggested action” execution (UI triggers an action string; backend acknowledges and can optionally persist a log).
 - Support “Custom Request” (UI sends a free-form prompt for one email and receives response text).
 
+Additional capabilities implemented in the current backend codebase:
+
+- Support AI-assisted compose polishing (`/api/ai/compose`) that returns a revised email body.
+- Support meeting-related detection (`/api/meeting/check`) based on email content and optional ICS attachments.
+- Support “needs reply” classification (`/api/reply-need`) and feedback logging (`/api/reply-need/feedback`).
+
 Optional (implementation choice, not a UI requirement):
 - Ingest emails server-side from IMAP4rev1 and send outbound mail via SMTP submission.
 - Precompute AI analysis in a worker at ingestion time (instead of on-demand).
@@ -34,18 +40,24 @@ The backend runs the same codebase in two concrete runtimes:
 	 - Never blocks request threads on mailbox ingestion (if a worker runtime is enabled).
 
 	Minimum REST surface (matches the frontend mock service shapes):
-	- `GET /api/emails?folder=<inbox|sent|drafts|trash|spam>&label=<optional>`
+	- `GET /api/emails?folder=<inbox|sent|drafts|trash|spam>&label=<optional>&limit=<1..200>&cursor=<receivedAtUtc>`
 	- `GET /api/emails/{emailId}`
 	- `PATCH /api/emails/{emailId}` (e.g., mark read)
-	- `POST /api/send-email` with `{ to, subject, body }`
+	- `POST /api/send-email` with `{ to, cc?, bcc?, subject, body }`
 	- `POST /api/email-actions` with `{ emailId, action }`
 	- `POST /api/ai/request` with `{ emailId, prompt }`
 
-2. **Ingestion + AI-Analysis Worker Runtime (Optional)**
+	Additional REST surface implemented by the current codebase:
+	- `POST /api/ai/compose` with `{ to?, cc?, subject?, body, instruction? }`
+	- `GET /api/meeting/check?messageId=<emailId>`
+	- `POST /api/reply-need` with `{ messageId }`
+	- `POST /api/reply-need/feedback` with `{ messageId, userLabel, comment? }`
+
+2. **Ingestion + Classification Worker Runtime (Optional)**
 	 - Fetches new messages and relevant attachments from the mailbox via IMAP.
 	 - Normalizes and persists email records.
-	 - Executes AI analysis exactly once per ingested email id (category/sentiment/summary/suggestedActions).
-	 - Writes AI analysis results to SQLite for fast browsing.
+	 - Executes meeting classification (best-effort; may be absent if Gemini fails) and email AI analysis (always stored once per email with deterministic fallback).
+	 - Writes classification results to SQLite for fast browsing.
 
 Both runtimes share:
 - The same SQLite3 database file (`data/outlookplus.db`) using WAL mode.
@@ -59,7 +71,7 @@ The frontend bundle does not implement a login flow, so the backend must choose 
 
 - **Mode A (dev / demo):** no auth required (all requests treated as a single demo user).
 - **Mode B (dev stub):** `Authorization: Bearer dev:<userId>` (matches existing backend README).
-- **Mode C (production):** real token verification (JWT/opaque) returning a stable `userId`.
+- **Mode C (production):** real token verification (JWT/opaque) returning a stable `userId` (**not implemented in the current codebase**).
 
 Regardless of mode, downstream services should operate on a `userId`.
 
@@ -68,25 +80,28 @@ Regardless of mode, downstream services should operate on a `userId`.
 	- Emails (UI fields: folder, read/unread, labels; plus metadata/body)
 	- Attachments (metadata + file paths; bytes stored on disk) (optional)
 	- AI analysis (category/sentiment/summary/suggestedActions)
+	- Meeting classification and reply-need classification + feedback (implemented)
 	- AI request/action logs (optional)
 	- Ingestion state (per-user last-seen IMAP UID + UIDVALIDITY)
 - All writes run inside transactions.
 - Attachment bytes are written under a file lock to prevent partial files.
 
+Implementation note (current code): schema is initialized on startup and includes a small best-effort migration step for older developer DB files.
+
 **Ingestion Pipeline (Worker Runtime)**
-- `MailboxClient` connects to the mailbox using IMAPS (TLS) and authenticates using a per-user App Password.
+- `MailboxClient` connects to the mailbox using IMAPS (TLS).
+- Current code uses a single set of IMAP credentials from environment variables (not per-user credentials); `userId` is still threaded through for API shape and storage partitioning.
 - `IngestionWorker` fetches new messages, persists each email, downloads attachments with `contentType == "text/calendar"` (optional), and then triggers AI analysis classification (optional).
 - `IcsExtractor` parses the first `text/calendar` attachment and extracts `METHOD`, `SUMMARY`, `DTSTART`, `DTEND`, `ORGANIZER`, `LOCATION`.
 
 **Outbound Mail Capability (Shared Backend)**
-- `SmtpClient` connects to the mailbox SMTP submission endpoint and authenticates using a per-user App Password.
+- `SmtpClient` connects to the SMTP submission endpoint and authenticates using environment variables (single credential set in the current codebase).
 - SMTP is required to support the frontend compose flow and shared mailbox integration.
 
 **AI Analysis (Worker or API Runtime)**
 - `EmailAnalysisClassifier` builds a bounded prompt from:
 	- subject/from/to/cc/sentAt
 	- a bounded body prefix
-	- optional extracted ICS fields (when available)
 - LLM client returns a strict JSON schema:
 	- `category: "Work"|"Personal"|"Finance"|"Social"|"Promotions"|"Urgent"`
 	- `sentiment: "positive"|"neutral"|"negative"`
@@ -97,6 +112,11 @@ Regardless of mode, downstream services should operate on a `userId`.
 **AI Assistant Requests (API Runtime)**
 - `AiAssistantService` accepts `{emailId, prompt}` and returns `responseText`.
 - The service may call an LLM or a rules-based mock, but it must not require frontend-side LLM calls.
+
+**Meeting + Reply-Need Classification (API + Worker)**
+
+- Meeting classification is computed by the worker (`MeetingClassifier`) after ingestion when possible; it uses ICS fields when a `text/calendar` attachment exists.
+- Reply-need classification is computed on-demand via `ReplyNeedService` and cached in SQLite; users can submit feedback which is stored for evaluation.
 
 ### Mermaid Architecture Diagram (Unified Backend)
 
@@ -111,17 +131,22 @@ flowchart TB
 			EmailAPI["EmailApiController<br/>GET /api/emails<br/>GET /api/emails/{emailId}<br/>PATCH /api/emails/{emailId}"]
 			ComposeAPI["ComposeApiController<br/>POST /api/send-email"]
 			ActionAPI["EmailActionApiController<br/>POST /api/email-actions"]
-			AiAPI["AiAssistantApiController<br/>POST /api/ai/request"]
+			AiAPI["AiAssistantApiController<br/>POST /api/ai/request<br/>POST /api/ai/compose"]
+			MeetAPI["MeetingApiController<br/>GET /api/meeting/check"]
+			ReplyAPI["ReplyNeedApiController<br/>POST /api/reply-need<br/>POST /api/reply-need/feedback"]
 			Auth["Auth (Mode A/B/C)"]
 			AiSvc[AiAssistantService]
 			ActionSvc[EmailActionService]
 			AnalysisSvc[EmailAnalysisService]
+			MeetSvc[MeetingService]
+			ReplySvc[ReplyNeedService]
 		end
 
-		subgraph Worker["Worker Runtime (Optional: Ingestion + AI analysis)"]
+		subgraph Worker["Worker Runtime (Optional: Ingestion + Classification)"]
 			Ingest[IngestionWorker]
 			MailClient["MailboxClient (IMAP4rev1)"]
 			Ics[IcsExtractor]
+			MeetCls[MeetingClassifier]
 			AnalysisCls[EmailAnalysisClassifier]
 		end
 
@@ -131,7 +156,7 @@ flowchart TB
 
 		subgraph Shared[Shared Libraries]
 			Prompt[PromptBuilder]
-			LLM["LLM Client (Gemini or other)"]
+			LLM["LLM Client (Gemini)"]
 			Validate["Strict Output Validator"]
 			Throttle[Rate Limiter + Retry/Backoff]
 		end
@@ -153,12 +178,16 @@ flowchart TB
 	UI -->|HTTPS| ComposeAPI
 	UI -->|HTTPS| ActionAPI
 	UI -->|HTTPS| AiAPI
+	UI -->|HTTPS| MeetAPI
+	UI -->|HTTPS| ReplyAPI
 
 	%% API internals
 	EmailAPI --> Auth
 	ComposeAPI --> Auth
 	ActionAPI --> Auth
 	AiAPI --> Auth
+	MeetAPI --> Auth
+	ReplyAPI --> Auth
 	EmailAPI --> DB
 	EmailAPI --> AnalysisSvc
 	AnalysisSvc --> DB
@@ -168,6 +197,10 @@ flowchart TB
 	AiSvc --> Prompt
 	AiSvc --> LLM
 	AiSvc --> Validate
+	MeetAPI --> MeetSvc
+	MeetSvc --> DB
+	ReplyAPI --> ReplySvc
+	ReplySvc --> DB
 
 	%% Worker pipeline
 	Ingest --> MailClient
@@ -176,7 +209,12 @@ flowchart TB
 	Ingest --> DB
 	Ingest --> Files
 	Ingest --> Ics
+	Ingest --> MeetCls
 	Ingest --> AnalysisCls
+	MeetCls --> Prompt
+	MeetCls --> LLM
+	MeetCls --> Validate
+	MeetCls --> DB
 	AnalysisCls --> Prompt
 	AnalysisCls --> LLM
 	AnalysisCls --> Validate

@@ -33,6 +33,11 @@ These are conceptual types used in APIs across modules. (In code they can be imp
 - `MailboxMessageId`: stable message identifier exposed to the frontend as `Email.id` (derived from IMAP UID + UIDVALIDITY or equivalent stable mailbox identity).
 - `UtcTimestamp`: RFC3339 timestamp in UTC.
 
+Implementation notes (current code):
+
+- Ingested IMAP messages use `MailboxMessageId = "{uidvalidity}:{uid}"`.
+- Sent messages created via `POST /api/send-email` use `MailboxMessageId = "sent_<epochMillis>"`.
+
 Frontend-facing enums (must match the frontend bundle):
 
 - `Folder`: `'inbox' | 'sent' | 'drafts' | 'trash' | 'spam'`
@@ -55,6 +60,14 @@ Frontend-facing enums (must match the frontend bundle):
 - Verify `Authorization: Bearer <token>` on incoming HTTP requests.
 - Produce a `UserId` for downstream services.
 - Fail closed: reject missing/invalid tokens.
+
+Implementation notes (current code):
+
+- Mode A (demo) bypasses auth and returns `user_id="demo"`.
+- Mode B (dev stub) accepts:
+	- `Authorization: Bearer dev:<userId>`
+	- OR `Authorization: Bearer <OUTLOOKPLUS_DEV_TOKEN>` and returns `OUTLOOKPLUS_DEV_USER_ID`.
+- Mode C is described in the architecture doc but is not implemented.
 
 **Does not do**
 
@@ -114,6 +127,11 @@ class AuthTokenVerifier:
 		def verify(self, authorization_header: str) -> "UserId":
 				"""Return UserId if header contains a valid Bearer token; raise AuthError otherwise."""
 				raise NotImplementedError
+
+
+def require_user_id(...) -> "UserId":
+		"""FastAPI dependency that returns the current user id based on auth mode."""
+		...
 ```
 
 ### Declarations (Public vs Private)
@@ -145,6 +163,8 @@ classDiagram
 	- email UI state: folder, read/unread, labels
 	- attachment metadata (optional)
 	- AI analysis (category/sentiment/summary/suggestedActions)
+	- meeting classification (optional; best-effort)
+	- reply-need classification + user feedback (optional)
 	- AI request logs and suggested-action logs (optional)
 	- ingestion state (per user mailbox cursor)
 - Write `text/calendar` attachment bytes to disk safely under a file lock.
@@ -165,6 +185,8 @@ classDiagram
 	- `EmailRepository`, `AttachmentRepository`, `EmailAnalysisRepository`, `AiRequestRepository`, `EmailActionRepository`, `IngestionStateRepository`
 - `AttachmentFileStore` writes bytes to deterministic paths and returns file paths.
 - All multi-row operations are performed through a `UnitOfWork` that scopes a transaction.
+
+Implementation note (current code): schema initialization also applies small best-effort migrations to keep older developer DB files working (e.g., adding missing UI columns and indexes).
 
 **Mermaid diagram**
 
@@ -223,58 +245,42 @@ PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS emails (
-	id                INTEGER PRIMARY KEY AUTOINCREMENT,
-	user_id           TEXT NOT NULL,
+	id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id            TEXT NOT NULL,
 	mailbox_message_id TEXT NOT NULL,
 
-	folder            TEXT NOT NULL CHECK(folder IN ('inbox','sent','drafts','trash','spam')),
-	is_read           INTEGER NOT NULL CHECK(is_read IN (0, 1)),
-	labels_json       TEXT NOT NULL,
+	folder             TEXT NOT NULL DEFAULT 'inbox',
+	is_read            INTEGER NOT NULL DEFAULT 0,
+	labels_json        TEXT NOT NULL DEFAULT '[]',
 
-	subject           TEXT,
-	from_addr         TEXT,
-	to_addrs          TEXT,
-	cc_addrs          TEXT,
-	sent_at_utc       TEXT,
-	received_at_utc   TEXT NOT NULL,
+	subject            TEXT,
+	from_addr          TEXT,
+	to_addrs           TEXT,
+	cc_addrs           TEXT,
+	sent_at_utc        TEXT,
+	received_at_utc    TEXT NOT NULL,
 
-	preview_text      TEXT,
-	body_text         TEXT,
-	body_html         TEXT,
+	preview_text       TEXT,
+	body_text          TEXT,
+	body_html          TEXT,
 
-	created_at_utc    TEXT NOT NULL,
+	created_at_utc     TEXT NOT NULL,
 
 	UNIQUE(user_id, mailbox_message_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_emails_user_received ON emails(user_id, received_at_utc);
-CREATE INDEX IF NOT EXISTS idx_emails_user_folder_received ON emails(user_id, folder, received_at_utc);
-
-CREATE TABLE IF NOT EXISTS attachments (
-	id              INTEGER PRIMARY KEY AUTOINCREMENT,
-	user_id         TEXT NOT NULL,
-	email_id        INTEGER NOT NULL,
-	filename        TEXT,
-	content_type    TEXT NOT NULL,
-	size_bytes      INTEGER,
-	storage_path    TEXT NOT NULL,
-	created_at_utc  TEXT NOT NULL,
-
-	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_attachments_email ON attachments(email_id);
 
 CREATE TABLE IF NOT EXISTS email_ai_analysis (
-	id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-	user_id               TEXT NOT NULL,
-	email_id              INTEGER NOT NULL,
+	id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id                TEXT NOT NULL,
+	email_id               INTEGER NOT NULL,
 
-	category              TEXT NOT NULL CHECK(category IN ('Work','Personal','Finance','Social','Promotions','Urgent')),
-	sentiment             TEXT NOT NULL CHECK(sentiment IN ('positive','neutral','negative')),
-	summary               TEXT NOT NULL,
+	category               TEXT NOT NULL,
+	sentiment              TEXT NOT NULL,
+	summary                TEXT NOT NULL,
 	suggested_actions_json TEXT NOT NULL,
-	source                TEXT NOT NULL,
+	source                 TEXT NOT NULL,
 	created_at_utc         TEXT NOT NULL,
 
 	UNIQUE(user_id, email_id),
@@ -284,12 +290,12 @@ CREATE TABLE IF NOT EXISTS email_ai_analysis (
 CREATE INDEX IF NOT EXISTS idx_email_ai_analysis_email ON email_ai_analysis(email_id);
 
 CREATE TABLE IF NOT EXISTS ai_requests (
-	id            INTEGER PRIMARY KEY AUTOINCREMENT,
-	user_id       TEXT NOT NULL,
-	email_id      INTEGER NOT NULL,
-	prompt_text   TEXT NOT NULL,
-	response_text TEXT NOT NULL,
-	source        TEXT NOT NULL,
+	id             INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id        TEXT NOT NULL,
+	email_id       INTEGER NOT NULL,
+	prompt_text    TEXT NOT NULL,
+	response_text  TEXT NOT NULL,
+	source         TEXT NOT NULL,
 	created_at_utc TEXT NOT NULL,
 
 	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
@@ -298,11 +304,11 @@ CREATE TABLE IF NOT EXISTS ai_requests (
 CREATE INDEX IF NOT EXISTS idx_ai_requests_email ON ai_requests(email_id);
 
 CREATE TABLE IF NOT EXISTS email_action_logs (
-	id            INTEGER PRIMARY KEY AUTOINCREMENT,
-	user_id       TEXT NOT NULL,
-	email_id      INTEGER NOT NULL,
-	action        TEXT NOT NULL,
-	status        TEXT NOT NULL,
+	id             INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id        TEXT NOT NULL,
+	email_id       INTEGER NOT NULL,
+	action         TEXT NOT NULL,
+	status         TEXT NOT NULL,
 	created_at_utc TEXT NOT NULL,
 
 	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
@@ -310,11 +316,76 @@ CREATE TABLE IF NOT EXISTS email_action_logs (
 
 CREATE INDEX IF NOT EXISTS idx_email_action_logs_email ON email_action_logs(email_id);
 
+CREATE TABLE IF NOT EXISTS attachments (
+	id             INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id        TEXT NOT NULL,
+	email_id       INTEGER NOT NULL,
+	filename       TEXT,
+	content_type   TEXT NOT NULL,
+	size_bytes     INTEGER,
+	storage_path   TEXT NOT NULL,
+	created_at_utc TEXT NOT NULL,
+
+	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_email ON attachments(email_id);
+
+CREATE TABLE IF NOT EXISTS meeting_classifications (
+	id              INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id         TEXT NOT NULL,
+	email_id        INTEGER NOT NULL,
+
+	meeting_related INTEGER NOT NULL CHECK(meeting_related IN (0, 1)),
+	confidence      REAL NOT NULL CHECK(confidence >= 0.0 AND confidence <= 1.0),
+	rationale       TEXT,
+	source          TEXT NOT NULL,
+	created_at_utc  TEXT NOT NULL,
+
+	UNIQUE(user_id, email_id),
+	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_meeting_email ON meeting_classifications(email_id);
+
+CREATE TABLE IF NOT EXISTS reply_need_classifications (
+	id             INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id        TEXT NOT NULL,
+	email_id       INTEGER NOT NULL,
+
+	label          TEXT NOT NULL CHECK(label IN ('NEEDS_REPLY', 'NO_REPLY_NEEDED', 'UNSURE')),
+	confidence     REAL NOT NULL CHECK(confidence >= 0.0 AND confidence <= 1.0),
+	reasons_json   TEXT NOT NULL,
+	source         TEXT NOT NULL,
+	created_at_utc TEXT NOT NULL,
+
+	UNIQUE(user_id, email_id),
+	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_reply_need_email ON reply_need_classifications(email_id);
+
+CREATE TABLE IF NOT EXISTS reply_need_feedback (
+	id                INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id           TEXT NOT NULL,
+	email_id          INTEGER NOT NULL,
+	classification_id INTEGER,
+
+	user_label        TEXT NOT NULL CHECK(user_label IN ('NEEDS_REPLY', 'NO_REPLY_NEEDED')),
+	comment           TEXT,
+	created_at_utc    TEXT NOT NULL,
+
+	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE,
+	FOREIGN KEY(classification_id) REFERENCES reply_need_classifications(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_email ON reply_need_feedback(email_id);
+
 CREATE TABLE IF NOT EXISTS ingestion_state (
-	user_id           TEXT PRIMARY KEY,
-	imap_uidvalidity  INTEGER NOT NULL,
-	last_seen_uid     INTEGER NOT NULL,
-	updated_at_utc    TEXT NOT NULL
+	user_id          TEXT PRIMARY KEY,
+	imap_uidvalidity INTEGER NOT NULL,
+	last_seen_uid    INTEGER NOT NULL,
+	updated_at_utc   TEXT NOT NULL
 );
 ```
 
@@ -329,18 +400,13 @@ from typing import Iterable, Optional, Protocol
 class ParsedEmail:
 	"""Normalized email produced by the MIME parsing step (worker-only input)."""
 
-	folder: str
 	subject: Optional[str]
 	from_addr: Optional[str]
 	to_addrs: Optional[str]
 	cc_addrs: Optional[str]
 	sent_at_utc: Optional[str]
 	received_at_utc: str
-	labels: list[str]
-	is_read: bool
-	preview_text: Optional[str]
 	body_text: Optional[str]
-	body_html: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -402,8 +468,19 @@ class UnitOfWork(Protocol):
 
 
 class EmailRepository(Protocol):
-		def upsert_email(self, *, user_id: str, mailbox_message_id: str, email: "ParsedEmail") -> int:
-				"""Insert email if new; return EmailId. Must be idempotent on (user_id, mailbox_message_id)."""
+		def upsert_email(
+				self,
+				*,
+				user_id: str,
+				mailbox_message_id: str,
+				email: "ParsedEmail",
+				folder: str = "inbox",
+				is_read: bool = False,
+				labels: list[str] | None = None,
+				preview_text: str | None = None,
+				body_html: str | None = None,
+		) -> int:
+				"""Insert or update; return EmailId. Idempotent on (user_id, mailbox_message_id)."""
 				...
 
 		def list_emails(self, *, user_id: str, folder: str, limit: int, cursor_received_at_utc: Optional[str]) -> list[EmailMessage]:
@@ -506,9 +583,11 @@ classDiagram
 
 **Text design**
 
-- `MailboxClient` is a thin, testable adapter around an IMAP library.
+- `MailboxClient` is a thin adapter around Python stdlib `imaplib`.
 - All network calls are wrapped by a retry/backoff policy and a rate limiter (shared utility).
 - Returns parsed results as `RawMailboxMessage` / `MailboxAttachmentPart` structs.
+
+Implementation note (current code): IMAP credentials are read from environment variables (single shared credential set); per-user credentials are not implemented.
 
 **Mermaid diagram**
 
@@ -602,6 +681,7 @@ classDiagram
 - Normalize and persist `emails` rows with plain-text body.
 - Download and persist metadata for attachments; write `text/calendar` bytes to disk.
 - Trigger email AI analysis exactly once per ingested `EmailId`.
+- Trigger meeting classification (best-effort) once per ingested `EmailId`.
 - Maintain per-user ingestion cursor (`ingestion_state`).
 
 **Does not do**
@@ -620,8 +700,9 @@ classDiagram
 	2. Uses `MailboxClient` to list + fetch new messages.
 	3. Parses RFC822 into `ParsedEmail` (subject/addresses/body + attachment parts).
 	4. Writes email + attachments using `UnitOfWork`.
-	5. Invokes `EmailAnalysisClassifier.classify_if_needed(email_id)` if analysis is missing.
-	6. Advances ingestion cursor only after persistence succeeds.
+	5. Invokes `MeetingClassifier.classify_if_needed(email_id)` if meeting status is missing (best-effort).
+	6. Invokes `EmailAnalysisClassifier.classify_if_needed(email_id)` if analysis is missing.
+	7. Advances ingestion cursor only after persistence succeeds.
 
 **Mermaid diagram**
 
@@ -794,7 +875,9 @@ classDiagram
 
 ---
 
-## Module 6 — Shared LLM Utilities Module (`PromptBuilder`, `LlmClient`, Validator, Throttle)
+## Module 6 — Shared LLM Utilities Module (`PromptBuilder`, `GeminiClient`, Validator, Throttle)
+
+Implementation note (current code): the concrete provider client is `GeminiClient` (Google Generative Language API) implemented using stdlib `urllib` to avoid third-party dependencies.
 
 ### Features
 
@@ -803,6 +886,9 @@ classDiagram
 - Build bounded prompts for:
 	- email AI analysis (category/sentiment/summary/suggestedActions)
 	- AI assistant “custom request” for a specific email
+	- meeting classification
+	- reply-need classification
+	- compose polishing
 - Call an LLM provider with retry/backoff and rate limiting.
 - Enforce strict JSON output schemas for email AI analysis (reject invalid JSON, missing keys, wrong types, invalid enum values).
 
@@ -816,7 +902,7 @@ classDiagram
 **Text design**
 
 - `PromptBuilder` is a pure component that returns prompt text + schema contract.
-- `LlmClient` wraps HTTP calls and returns raw model text.
+- `GeminiClient` wraps HTTP calls (stdlib `urllib`) and returns raw model text.
 - `StrictJsonValidator` validates and parses model text into typed dicts.
 - `RateLimiter` + `RetryPolicy` wrap both Gemini and mailbox calls (cross-cutting utilities).
 
@@ -826,7 +912,7 @@ classDiagram
 flowchart TB
 	Svc[EmailAnalysis/AiAssistant Service] --> Prompt[PromptBuilder]
 	Svc --> Throttle[RateLimiter + RetryPolicy]
-	Throttle --> LLM[LlmClient]
+	Throttle --> LLM[GeminiClient]
 	LLM -->|raw text| Validate[StrictJsonValidator]
 	Validate -->|typed result| Svc
 ```
@@ -860,7 +946,7 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class EmailAnalysisPromptInput:
+class MeetingPromptInput:
 	subject: str | None
 	from_addr: str | None
 	to_addrs: str | None
@@ -876,35 +962,74 @@ class EmailAnalysisPromptInput:
 
 
 @dataclass(frozen=True)
-class AiAssistantPromptInput:
+class ReplyNeedPromptInput:
 	subject: str | None
 	from_addr: str | None
+	to_addrs: str | None
+	cc_addrs: str | None
 	sent_at_utc: str | None
 	body_prefix: str
-	user_prompt: str
+	meeting_related: bool
+	meeting_confidence: float
 
 
 class PromptBuilder:
-	def build_email_analysis_prompt(self, *, input: EmailAnalysisPromptInput) -> str:
+	def build_email_analysis_prompt(
+		self,
+		*,
+		subject: str | None,
+		from_addr: str | None,
+		to_addrs: str | None,
+		cc_addrs: str | None,
+		sent_at_utc: str | None,
+		body_prefix: str,
+	) -> str:
 		...
 
-	def build_ai_assistant_prompt(self, *, input: AiAssistantPromptInput) -> str:
+	def build_ai_assistant_prompt(
+		self,
+		*,
+		subject: str | None,
+		from_addr: str | None,
+		to_addrs: str | None,
+		cc_addrs: str | None,
+		sent_at_utc: str | None,
+		body_prefix: str,
+		user_prompt: str,
+	) -> str:
+		...
+
+	def build_meeting_prompt(self, *, input: MeetingPromptInput) -> str:
+		...
+
+	def build_reply_need_prompt(self, *, input: ReplyNeedPromptInput) -> str:
+		...
+
+	def build_compose_suggestion_prompt(
+		self,
+		*,
+		to_addrs: str | None,
+		cc_addrs: str | None,
+		subject: str | None,
+		draft_body: str,
+		instruction: str | None,
+	) -> str:
 		...
 
 
 @dataclass(frozen=True)
-class LlmResponse:
-    raw_text: str
+class GeminiResponse:
+	raw_text: str
 
 
-class LlmError(Exception):
-    pass
+class GeminiError(Exception):
+	pass
 
 
-class LlmClient:
-	def generate_text(self, *, prompt: str) -> LlmResponse:
-		"""Call the configured LLM provider and return raw text. Raises LlmError on transport/auth errors."""
-        ...
+class GeminiClient:
+	def generate_json(self, *, prompt: str) -> "GeminiResponse":
+		"""Call Gemini and return model text (expected to be strict JSON). Raises GeminiError on transport/auth errors."""
+		...
 
 
 class JsonValidationError(Exception):
@@ -914,11 +1039,20 @@ class JsonValidationError(Exception):
 class StrictJsonValidator:
 	def validate_email_analysis(self, *, raw_text: str) -> dict[str, Any]:
         ...
+
+	def validate_ai_request(self, *, raw_text: str) -> dict[str, Any]:
+		...
+
+	def validate_meeting(self, *, raw_text: str) -> dict[str, Any]:
+		...
+
+	def validate_reply_need(self, *, raw_text: str) -> dict[str, Any]:
+		...
 ```
 
 ### Declarations (Public vs Private)
 
-- **Public**: `PromptBuilder` methods, `LlmClient.generate_text`, validator methods, error types
+- **Public**: `PromptBuilder` methods, `GeminiClient.generate_json`, validator methods, error types
 - **Private**: HTTP transport details, backoff jitter strategy, schema-check helpers
 
 ### Mermaid Class Hierarchy
@@ -926,18 +1060,21 @@ class StrictJsonValidator:
 ```mermaid
 classDiagram
 	class PromptBuilder {
-		+build_email_analysis_prompt(input: EmailAnalysisPromptInput) str
-		+build_ai_assistant_prompt(input: AiAssistantPromptInput) str
+		+build_email_analysis_prompt(subject, from_addr, to_addrs, cc_addrs, sent_at_utc, body_prefix) str
+		+build_ai_assistant_prompt(subject, from_addr, to_addrs, cc_addrs, sent_at_utc, body_prefix, user_prompt) str
+		+build_meeting_prompt(input: MeetingPromptInput) str
+		+build_reply_need_prompt(input: ReplyNeedPromptInput) str
+		+build_compose_suggestion_prompt(to_addrs, cc_addrs, subject, draft_body, instruction) str
 	}
-	class LlmClient {
-		+generate_text(prompt: str) LlmResponse
+	class GeminiClient {
+		+generate_json(prompt: str) GeminiResponse
 	}
 	class StrictJsonValidator {
 		+validate_email_analysis(raw_text: str) dict
 	}
-	class LlmError
+	class GeminiError
 	class JsonValidationError
-	LlmClient ..> LlmError : raises
+	GeminiClient ..> GeminiError : raises
 	StrictJsonValidator ..> JsonValidationError : raises
 ```
 
@@ -969,11 +1106,13 @@ classDiagram
 **Text design**
 
 
+
+Implementation note (current code): email analysis does not include ICS fields in its prompt; ICS extraction is used by meeting classification.
+
 - `EmailAnalysisClassifier` builds a structured prompt using:
 	- subject/from/to/cc/sentAt
 	- a bounded body prefix
-	- extracted ICS fields when present
-- Calls `LlmClient`, validates with `StrictJsonValidator.validate_email_analysis`, and writes to `email_ai_analysis`.
+- Calls `GeminiClient`, validates with `StrictJsonValidator.validate_email_analysis`, and writes to `email_ai_analysis`.
 - `EmailAnalysisService` reads analysis by `EmailId` and provides deterministic defaults when absent.
 
 **Mermaid diagram**
@@ -982,7 +1121,7 @@ classDiagram
 flowchart TB
 	Worker[IngestionWorker] --> Classifier[EmailAnalysisClassifier]
 	Classifier --> Prompt[PromptBuilder]
-	Classifier --> LLM[LlmClient]
+	Classifier --> LLM[GeminiClient]
 	Classifier --> Validate[StrictJsonValidator]
 	Classifier --> Repo[EmailAnalysisRepository]
 	Repo --> DB[(SQLite: email_ai_analysis)]
@@ -1067,7 +1206,7 @@ classDiagram
 		+source: str
 	}
 	EmailAnalysisClassifier ..> PromptBuilder
-	EmailAnalysisClassifier ..> LlmClient
+	EmailAnalysisClassifier ..> GeminiClient
 	EmailAnalysisClassifier ..> StrictJsonValidator
 	EmailAnalysisClassifier ..> EmailAnalysisRepository
 	EmailAnalysisService ..> EmailAnalysisRepository
@@ -1084,6 +1223,9 @@ classDiagram
 - Handle the frontend “Custom Request” interaction for a specific email.
 	- Input: `{ emailId, prompt }`
 	- Output: `{ emailId, responseText }`
+- Handle AI-assisted compose polishing.
+	- Input: `{ to?, cc?, subject?, body, instruction? }`
+	- Output: `{ revisedText, source }`
 - Handle the frontend “Suggested Actions” click interaction.
 	- Input: `{ emailId, action }`
 	- Output: `{ emailId, action, status: "ok" }`
@@ -1102,7 +1244,7 @@ classDiagram
 - `AiAssistantService.run_request(user_id, mailbox_message_id, prompt)`:
 	1. Resolves `mailbox_message_id` → `EmailId` via `EmailRepository`.
 	2. Builds a bounded prompt via `PromptBuilder.build_ai_assistant_prompt`.
-	3. Calls `LlmClient.generate_text`.
+	3. Calls `GeminiClient.generate_json`.
 	4. Stores `{prompt_text, response_text}` in `ai_requests` (optional but recommended).
 	5. Returns `responseText`.
 
@@ -1120,7 +1262,7 @@ flowchart TB
 	API2[EmailActionApiController] --> ActSvc[EmailActionService]
 	AiSvc --> EmailRepo[EmailRepository]
 	AiSvc --> Prompt[PromptBuilder]
-	AiSvc --> LLM[LlmClient]
+	AiSvc --> LLM[GeminiClient]
 	AiSvc --> ReqRepo[AiRequestRepository]
 	ReqRepo --> ReqDB[(SQLite: ai_requests)]
 	ActSvc --> EmailRepo
@@ -1211,7 +1353,7 @@ classDiagram
 	}
 	AiAssistantService ..> EmailRepository
 	AiAssistantService ..> PromptBuilder
-	AiAssistantService ..> LlmClient
+	AiAssistantService ..> GeminiClient
 	EmailActionService ..> EmailRepository
 ```
 
@@ -1342,6 +1484,12 @@ classDiagram
 
 ---
 
+Additional REST API (implemented):
+
+- `POST /api/ai/compose`
+	- Request: `{ "to": "..."?, "cc": "..."?, "subject": "..."?, "body": "...", "instruction": "..."? }`
+	- Response 200: `{ "revisedText": "...", "source": "gemini" | "default" }`
+
 ## Module 10 — Compose + SMTP Outbound Mail Module (`SmtpClient`)
 
 ### Features
@@ -1405,9 +1553,48 @@ class SmtpError(Exception):
 
 
 class SmtpClient:
-		def send(self, *, user_id: str, mime_message_bytes: bytes) -> None:
+		def send(self, *, user_id: str, from_addr: str, to_addrs: list[str], mime_message_bytes: bytes) -> None:
 				"""Submit an email message via SMTP. Raises SmtpError on failure."""
 				...
+
+---
+
+## Module 11 — Meeting Classification Module (`MeetingClassifier`, `MeetingService`)
+
+### Features
+
+**Can do**
+
+- Classify whether an email is meeting-related, returning `{meetingRelated, confidence, rationale, source}`.
+- Use the first stored `text/calendar` attachment (if present) and extract a limited set of ICS fields.
+- Cache results in SQLite (`meeting_classifications`) for fast subsequent reads.
+
+**Does not do**
+
+- Guarantee a stored result when Gemini is unavailable (current implementation is best-effort; absence implies defaults).
+
+### External API (REST)
+
+- `GET /api/meeting/check?messageId=<MailboxMessageId>`
+	- Response 200: `{ messageId, meetingRelated, confidence, rationale?, source }`
+	- Response 404: email not found
+
+---
+
+## Module 12 — Reply-Need Classification + Feedback Module (`ReplyNeedService`)
+
+### Features
+
+**Can do**
+
+- Classify whether an email needs a reply, returning `{label, confidence, reasons, source}`.
+- Cache classification in SQLite (`reply_need_classifications`).
+- Record user feedback in SQLite (`reply_need_feedback`).
+
+### External API (REST)
+
+- `POST /api/reply-need` with `{ messageId }`
+- `POST /api/reply-need/feedback` with `{ messageId, userLabel, comment? }` (returns 204)
 ```
 
 ### Declarations (Public vs Private)
@@ -1437,9 +1624,11 @@ This section ensures every named architecture component is covered by exactly on
 - `MailboxClient` → Module 3 (IMAP)
 - `IngestionWorker` → Module 4 (Worker)
 - `IcsExtractor` → Module 5 (ICS)
-- `PromptBuilder`, `LlmClient`, `Strict JSON Output Validator`, `Rate Limiter + Retry/Backoff` → Module 6 (LLM Utilities)
+- `PromptBuilder`, `GeminiClient`, `Strict JSON Output Validator`, `Rate Limiter + Retry/Backoff` → Module 6 (LLM Utilities)
 - `EmailAnalysisClassifier`, `EmailAnalysisService` → Module 7 (Email AI Analysis)
 - `AiAssistantService`, `EmailActionService`, `AiAssistantApiController`, `EmailActionApiController` → Module 8 (AI Assistant + Actions)
 - `EmailApiController` → Module 9 (Email APIs)
 - `SmtpClient`, `ComposeApiController` → Module 10 (Compose + SMTP)
+- `MeetingClassifier`, `MeetingService`, `MeetingApiController` → Module 11 (Meeting)
+- `ReplyNeedService`, `ReplyNeedApiController` → Module 12 (Reply Need + Feedback)
 
