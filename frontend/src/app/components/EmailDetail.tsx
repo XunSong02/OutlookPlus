@@ -18,7 +18,7 @@ import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Email } from '../types';
 import { toast } from 'sonner';
-import { mockExecuteEmailAction, mockRunAiRequest } from '../services/mockBackend';
+import { executeEmailAction, runAiRequest } from '../services/outlookplusApi';
 
 interface EmailDetailProps {
   email: Email;
@@ -33,8 +33,11 @@ export function EmailDetail({ email, onClose }: EmailDetailProps) {
     const handleActionClick = async (action: string) => {
         setIsProcessing(true);
         try {
-            await mockExecuteEmailAction({ emailId: email.id, action });
+            await executeEmailAction({ emailId: email.id, action });
             toast.success(`Action executed: ${action}`);
+        } catch (err) {
+            console.error('Failed to execute email action via backend.', err);
+            toast.error('Failed to execute action');
         } finally {
             setIsProcessing(false);
         }
@@ -46,9 +49,12 @@ export function EmailDetail({ email, onClose }: EmailDetailProps) {
 
     setIsProcessing(true);
         try {
-            const result = await mockRunAiRequest({ emailId: email.id, prompt: customAction });
+            const result = await runAiRequest({ emailId: email.id, prompt: customAction });
             setAiResponse(result.responseText);
             setCustomAction('');
+        } catch (err) {
+            console.error('Failed to run AI request via backend.', err);
+            toast.error('Failed to run AI request');
         } finally {
             setIsProcessing(false);
         }

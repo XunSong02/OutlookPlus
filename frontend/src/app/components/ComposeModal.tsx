@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { X, Paperclip, Send, Mic, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
-import { mockSendEmail } from '../services/mockBackend';
+import { sendEmail, suggestCompose } from '../services/outlookplusApi';
+import { useEmails } from '../state/emails';
 
 interface ComposeModalProps {
   isOpen: boolean;
@@ -13,40 +14,66 @@ export function ComposeModal({ isOpen, onClose }: ComposeModalProps) {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isAssisting, setIsAssisting] = useState(false);
+  const { reload } = useEmails();
+
+  const resetForm = useCallback(() => {
+    setTo('');
+    setSubject('');
+    setBody('');
+    setIsSending(false);
+    setIsAssisting(false);
+  }, []);
+
+  useEffect(() => {
+    // Treat each open as a fresh "New Message".
+    if (isOpen) {
+      resetForm();
+    }
+  }, [isOpen, resetForm]);
 
   useEffect(() => {
     if (!isOpen) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        resetForm();
         onClose();
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, resetForm]);
 
   if (!isOpen) return null;
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSending) return;
     if (!to || !subject || !body) {
       toast.error('Please fill in all fields');
       return;
     }
 
     setIsSending(true);
-    await mockSendEmail({ to, subject, body });
-    
-    toast.success('Email sent successfully!');
-    setIsSending(false);
+    try {
+      await sendEmail({ to, subject, body });
+      await reload();
+      toast.success('Email sent successfully!');
+      resetForm();
+      onClose();
+    } catch (err) {
+      console.error('Failed to send email via backend.', err);
+      toast.error('Failed to send email');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleDiscard = () => {
+    resetForm();
     onClose();
-    
-    // Reset form
-    setTo('');
-    setSubject('');
-    setBody('');
   };
 
   return (
@@ -63,7 +90,7 @@ export function ComposeModal({ isOpen, onClose }: ComposeModalProps) {
           <h2 id="compose-title" className="font-semibold text-gray-800">New Message</h2>
           <button 
             type="button"
-            onClick={onClose}
+            onClick={handleDiscard}
             className="p-1 rounded-full hover:bg-gray-200 text-gray-500 transition-colors"
             aria-label="Close compose window"
           >
@@ -111,17 +138,44 @@ export function ComposeModal({ isOpen, onClose }: ComposeModalProps) {
             {/* AI Assistant Button */}
             <button
                 type="button"
-                className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-full text-xs font-medium hover:bg-blue-100 transition-colors shadow-sm"
-                onClick={() => {
-                    const suggestions = ["Checking in on the project status...", "Thank you for the update...", "Let's schedule a meeting..."];
-                    const random = suggestions[Math.floor(Math.random() * suggestions.length)];
-                    setBody(prev => prev + (prev ? "\n\n" : "") + random);
-                    toast.info("AI suggestion added!");
+                disabled={isAssisting}
+                className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-full text-xs font-medium hover:bg-blue-100 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                onClick={async () => {
+                  if (isAssisting) return;
+                  const draft = body.trim();
+                  if (!draft) {
+                    toast.error('Please write something first');
+                    return;
+                  }
+
+                  setIsAssisting(true);
+                  try {
+                    const res = await suggestCompose({
+                      to: to.trim() || undefined,
+                      subject: subject.trim() || undefined,
+                      body: draft,
+                    });
+
+                    if (res.revisedText && res.revisedText.trim()) {
+                      setBody(res.revisedText);
+                    }
+
+                    if (res.source === 'gemini') {
+                      toast.info('AI suggestion applied!');
+                    } else {
+                      toast.info('AI not configured; set GEMINI_API_KEY');
+                    }
+                  } catch (err) {
+                    console.error('AI assist failed.', err);
+                    toast.error('AI assist failed');
+                  } finally {
+                    setIsAssisting(false);
+                  }
                 }}
               aria-label="Add an AI writing suggestion"
             >
               <Sparkles size={14} aria-hidden="true" />
-                <span>AI Assist</span>
+                <span>{isAssisting ? 'Working...' : 'AI Assist'}</span>
             </button>
           </div>
 
@@ -139,7 +193,7 @@ export function ComposeModal({ isOpen, onClose }: ComposeModalProps) {
             <div className="flex items-center gap-3">
               <button 
                 type="button" 
-                onClick={onClose}
+                onClick={handleDiscard}
                 className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 Discard

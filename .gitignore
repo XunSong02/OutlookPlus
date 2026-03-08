@@ -7,6 +7,16 @@
 **/.next/
 **/.vite/
 
+# Frontend build outputs (explicit)
+frontend/dist/
+frontend/build/
+frontend/.next/
+frontend/out/
+frontend/.output/
+frontend/.vercel/
+frontend/.turbo/
+frontend/coverage/
+
 # Logs
 **/*.log
 npm-debug.log*

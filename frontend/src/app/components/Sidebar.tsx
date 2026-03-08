@@ -6,7 +6,6 @@ import {
   File, 
   Trash2, 
   AlertOctagon, 
-  Settings, 
   Plus, 
   BrainCircuit
 } from 'lucide-react';
@@ -119,9 +118,6 @@ export function Sidebar({ className, onComposeClick }: SidebarProps) {
 
       {/* User Footer */}
       <div className="mt-auto pt-4 pb-2 w-full flex flex-col items-center gap-4 border-t border-gray-200 shrink-0">
-        <button type="button" className="text-gray-400 hover:text-gray-600 transition-colors" aria-label="Settings" title="Settings">
-            <Settings size={20} aria-hidden="true" />
-        </button>
         <div className="w-10 h-10 rounded-full overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all">
            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150" alt="Current user profile photo" className="w-full h-full object-cover" />
         </div>

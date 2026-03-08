@@ -1,0 +1,61 @@
+# OutlookPlus backend runtime configuration
+# Fill in the values you need. Do not commit real secrets.
+
+# -----------------------
+# API server (run_api.py)
+# -----------------------
+OUTLOOKPLUS_API_HOST=127.0.0.1
+OUTLOOKPLUS_API_PORT=8000
+
+# -----------------------
+# Auth
+# -----------------------
+# A: demo/no-auth (no Authorization header required)
+# B: dev stub (requires Authorization: Bearer dev:<userId>)
+OUTLOOKPLUS_AUTH_MODE=A
+
+# If you choose AUTH_MODE=B, you can optionally use a fixed token -> fixed user mapping:
+# OUTLOOKPLUS_DEV_TOKEN=
+# OUTLOOKPLUS_DEV_USER_ID=
+
+# -----------------------
+# Storage (optional)
+# -----------------------
+# OUTLOOKPLUS_DB_PATH=data/outlookplus.db
+# OUTLOOKPLUS_ATTACHMENTS_DIR=data/attachments
+
+# -----------------------
+# Worker (run_worker.py)
+# -----------------------
+# Required for the worker loop.
+OUTLOOKPLUS_WORKER_USER_ID=demo
+
+# -----------------------
+# IMAP ingestion (worker)
+# -----------------------
+# If these are not set, ingestion will typically fetch 0 messages.
+OUTLOOKPLUS_IMAP_HOST=imap.gmail.com
+OUTLOOKPLUS_IMAP_PORT=993
+OUTLOOKPLUS_IMAP_USERNAME=
+OUTLOOKPLUS_IMAP_PASSWORD=
+OUTLOOKPLUS_IMAP_FOLDER=INBOX
+
+# -----------------------
+# SMTP outbound (API /send-email)
+# -----------------------
+# If these are not set, /api/send-email will return 400 (SMTP not configured).
+OUTLOOKPLUS_SMTP_HOST=smtp.gmail.com
+OUTLOOKPLUS_SMTP_PORT=587
+OUTLOOKPLUS_SMTP_USERNAME=
+OUTLOOKPLUS_SMTP_PASSWORD=
+
+# -----------------------
+# Gemini (meeting + reply-need)
+# -----------------------
+# If not set, AI features will degrade gracefully.
+# GEMINI_API_KEY=
+OUTLOOKPLUS_GEMINI_MODEL=gemini-3-flash-preview
+# OUTLOOKPLUS_GEMINI_ENDPOINT= 
+
+# Reply-need deterministic fallback threshold (optional)
+# REPLY_NEED_MIN_CONFIDENCE=0.65

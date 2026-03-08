@@ -5,7 +5,9 @@
 
 ### Scope and Definitions
 
-This document defines the backend **modules** implied by the unified backend architecture (API runtime + ingestion worker runtime) in [OutlookPlus/backend/backend_specification_Architecture.md](OutlookPlus/backend/backend_specification_Architecture.md).
+This document defines the backend **modules** implied by the unified backend architecture (API runtime + optional ingestion worker runtime) in [OutlookPlus/backend/backend_specification_Architecture.md](OutlookPlus/backend/backend_specification_Architecture.md).
+
+The target product surface is the UI implemented in the frontend folder. The canonical frontend data contract is the `Email` type in [OutlookPlus/frontend/src/app/types.ts](../frontend/src/app/types.ts) and the mock backend shapes in [OutlookPlus/frontend/src/app/services/mockBackend.ts](../frontend/src/app/services/mockBackend.ts).
 
 **Module granularity used here (grouped modules)**
 
@@ -26,15 +28,21 @@ This document defines the backend **modules** implied by the unified backend arc
 
 These are conceptual types used in APIs across modules. (In code they can be implemented as `NewType` wrappers or simple aliases.)
 
-- `UserId`: stable identifier for the authenticated user.
+- `UserId`: stable identifier for the authenticated (or demo) user.
 - `EmailId`: backend-generated primary key for persisted emails.
-- `MailboxMessageId`: message identifier derived from IMAP UID + UIDVALIDITY (or equivalent stable mailbox identity).
+- `MailboxMessageId`: stable message identifier exposed to the frontend as `Email.id` (derived from IMAP UID + UIDVALIDITY or equivalent stable mailbox identity).
 - `UtcTimestamp`: RFC3339 timestamp in UTC.
 
-**Failure and determinism rule (important for US2/US3):**
+Frontend-facing enums (must match the frontend bundle):
 
-- Meeting classification (US2) is stored once per `EmailId`.
-- Reply-needed classification (US3) returns deterministic output under failure: `label="UNSURE"` whenever Gemini fails, output validation fails, or `confidence < REPLY_NEED_MIN_CONFIDENCE`.
+- `Folder`: `'inbox' | 'sent' | 'drafts' | 'trash' | 'spam'`
+- `AiCategory`: `'Work' | 'Personal' | 'Finance' | 'Social' | 'Promotions' | 'Urgent'`
+- `Sentiment`: `'positive' | 'neutral' | 'negative'`
+
+**Failure and determinism rule (important for the frontend UI contract):**
+
+- AI analysis is stored once per `EmailId`.
+- The email list and detail endpoints must always return an `aiAnalysis` object with valid enum values. If the LLM is unavailable or output validation fails, the backend must return deterministic safe defaults (e.g., `category="Work"`, `sentiment="neutral"`, `summary` derived from subject/body prefix, and `suggestedActions=[]`).
 
 ---
 
@@ -133,10 +141,11 @@ classDiagram
 **Can do**
 
 - Provide transactional persistence for:
-	- normalized emails + plain-text body
-	- attachment metadata
-	- meeting classifications (US2)
-	- reply-need classifications + user feedback (US3)
+	- normalized emails + plain-text body (and optional HTML)
+	- email UI state: folder, read/unread, labels
+	- attachment metadata (optional)
+	- AI analysis (category/sentiment/summary/suggestedActions)
+	- AI request logs and suggested-action logs (optional)
 	- ingestion state (per user mailbox cursor)
 - Write `text/calendar` attachment bytes to disk safely under a file lock.
 - Support concurrent reads/writes across API runtime and worker runtime via WAL.
@@ -145,7 +154,7 @@ classDiagram
 
 - IMAP/SMTP network calls.
 - LLM prompt construction or calling Gemini.
-- Business decisions like “meetingRelated” or “needs reply”.
+- Business decisions like AI category/sentiment/summary generation.
 
 ### Internal Architecture
 
@@ -153,7 +162,7 @@ classDiagram
 
 - `Db` wraps a SQLite connection factory, enables WAL, enforces `foreign_keys=ON`.
 - Repositories (DAOs) provide narrow, typed access methods per aggregate:
-	- `EmailRepository`, `AttachmentRepository`, `MeetingRepository`, `ReplyNeedRepository`, `IngestionStateRepository`
+	- `EmailRepository`, `AttachmentRepository`, `EmailAnalysisRepository`, `AiRequestRepository`, `EmailActionRepository`, `IngestionStateRepository`
 - `AttachmentFileStore` writes bytes to deterministic paths and returns file paths.
 - All multi-row operations are performed through a `UnitOfWork` that scopes a transaction.
 
@@ -166,16 +175,18 @@ flowchart TB
 		UoW[UnitOfWork Transaction]
 		EmailRepo[EmailRepository]
 		AttRepo[AttachmentRepository]
-		MeetRepo[MeetingRepository]
-		RNRepo[ReplyNeedRepository]
+		AiRepo[EmailAnalysisRepository]
+		ReqRepo[AiRequestRepository]
+		ActRepo[EmailActionRepository]
 		ISRepo[IngestionStateRepository]
 		Files[AttachmentFileStore]
 	end
 	UoW --> Db
 	EmailRepo --> Db
 	AttRepo --> Db
-	MeetRepo --> Db
-	RNRepo --> Db
+	AiRepo --> Db
+	ReqRepo --> Db
+	ActRepo --> Db
 	ISRepo --> Db
 	AttRepo --> Files
 ```
@@ -216,6 +227,10 @@ CREATE TABLE IF NOT EXISTS emails (
 	user_id           TEXT NOT NULL,
 	mailbox_message_id TEXT NOT NULL,
 
+	folder            TEXT NOT NULL CHECK(folder IN ('inbox','sent','drafts','trash','spam')),
+	is_read           INTEGER NOT NULL CHECK(is_read IN (0, 1)),
+	labels_json       TEXT NOT NULL,
+
 	subject           TEXT,
 	from_addr         TEXT,
 	to_addrs          TEXT,
@@ -223,7 +238,9 @@ CREATE TABLE IF NOT EXISTS emails (
 	sent_at_utc       TEXT,
 	received_at_utc   TEXT NOT NULL,
 
+	preview_text      TEXT,
 	body_text         TEXT,
+	body_html         TEXT,
 
 	created_at_utc    TEXT NOT NULL,
 
@@ -231,6 +248,7 @@ CREATE TABLE IF NOT EXISTS emails (
 );
 
 CREATE INDEX IF NOT EXISTS idx_emails_user_received ON emails(user_id, received_at_utc);
+CREATE INDEX IF NOT EXISTS idx_emails_user_folder_received ON emails(user_id, folder, received_at_utc);
 
 CREATE TABLE IF NOT EXISTS attachments (
 	id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,55 +265,50 @@ CREATE TABLE IF NOT EXISTS attachments (
 
 CREATE INDEX IF NOT EXISTS idx_attachments_email ON attachments(email_id);
 
-CREATE TABLE IF NOT EXISTS meeting_classifications (
-	id              INTEGER PRIMARY KEY AUTOINCREMENT,
-	user_id         TEXT NOT NULL,
-	email_id        INTEGER NOT NULL,
+CREATE TABLE IF NOT EXISTS email_ai_analysis (
+	id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id               TEXT NOT NULL,
+	email_id              INTEGER NOT NULL,
 
-	meeting_related INTEGER NOT NULL CHECK(meeting_related IN (0, 1)),
-	confidence      REAL NOT NULL CHECK(confidence >= 0.0 AND confidence <= 1.0),
-	rationale       TEXT,
-	source          TEXT NOT NULL,
-	created_at_utc  TEXT NOT NULL,
-
-	UNIQUE(user_id, email_id),
-	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_meeting_email ON meeting_classifications(email_id);
-
-CREATE TABLE IF NOT EXISTS reply_need_classifications (
-	id              INTEGER PRIMARY KEY AUTOINCREMENT,
-	user_id         TEXT NOT NULL,
-	email_id        INTEGER NOT NULL,
-
-	label           TEXT NOT NULL CHECK(label IN ('NEEDS_REPLY', 'NO_REPLY_NEEDED', 'UNSURE')),
-	confidence      REAL NOT NULL CHECK(confidence >= 0.0 AND confidence <= 1.0),
-	reasons_json    TEXT NOT NULL,
-	source          TEXT NOT NULL,
-	created_at_utc  TEXT NOT NULL,
+	category              TEXT NOT NULL CHECK(category IN ('Work','Personal','Finance','Social','Promotions','Urgent')),
+	sentiment             TEXT NOT NULL CHECK(sentiment IN ('positive','neutral','negative')),
+	summary               TEXT NOT NULL,
+	suggested_actions_json TEXT NOT NULL,
+	source                TEXT NOT NULL,
+	created_at_utc         TEXT NOT NULL,
 
 	UNIQUE(user_id, email_id),
 	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_reply_need_email ON reply_need_classifications(email_id);
+CREATE INDEX IF NOT EXISTS idx_email_ai_analysis_email ON email_ai_analysis(email_id);
 
-CREATE TABLE IF NOT EXISTS reply_need_feedback (
-	id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-	user_id            TEXT NOT NULL,
-	email_id           INTEGER NOT NULL,
-	classification_id  INTEGER,
+CREATE TABLE IF NOT EXISTS ai_requests (
+	id            INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id       TEXT NOT NULL,
+	email_id      INTEGER NOT NULL,
+	prompt_text   TEXT NOT NULL,
+	response_text TEXT NOT NULL,
+	source        TEXT NOT NULL,
+	created_at_utc TEXT NOT NULL,
 
-	user_label         TEXT NOT NULL CHECK(user_label IN ('NEEDS_REPLY', 'NO_REPLY_NEEDED')),
-	comment            TEXT,
-	created_at_utc     TEXT NOT NULL,
-
-	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE,
-	FOREIGN KEY(classification_id) REFERENCES reply_need_classifications(id) ON DELETE SET NULL
+	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_feedback_email ON reply_need_feedback(email_id);
+CREATE INDEX IF NOT EXISTS idx_ai_requests_email ON ai_requests(email_id);
+
+CREATE TABLE IF NOT EXISTS email_action_logs (
+	id            INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id       TEXT NOT NULL,
+	email_id      INTEGER NOT NULL,
+	action        TEXT NOT NULL,
+	status        TEXT NOT NULL,
+	created_at_utc TEXT NOT NULL,
+
+	FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_action_logs_email ON email_action_logs(email_id);
 
 CREATE TABLE IF NOT EXISTS ingestion_state (
 	user_id           TEXT PRIMARY KEY,
@@ -316,13 +329,18 @@ from typing import Iterable, Optional, Protocol
 class ParsedEmail:
 	"""Normalized email produced by the MIME parsing step (worker-only input)."""
 
+	folder: str
 	subject: Optional[str]
 	from_addr: Optional[str]
 	to_addrs: Optional[str]
 	cc_addrs: Optional[str]
 	sent_at_utc: Optional[str]
 	received_at_utc: str
+	labels: list[str]
+	is_read: bool
+	preview_text: Optional[str]
 	body_text: Optional[str]
+	body_html: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -339,13 +357,29 @@ class EmailMessage:
 		id: int
 		user_id: str
 		mailbox_message_id: str
+		folder: str
+		is_read: bool
+		labels: list[str]
 		subject: Optional[str]
 		from_addr: Optional[str]
 		to_addrs: Optional[str]
 		cc_addrs: Optional[str]
 		sent_at_utc: Optional[str]
 		received_at_utc: str
+		preview_text: Optional[str]
 		body_text: Optional[str]
+		body_html: Optional[str]
+
+
+@dataclass(frozen=True)
+class EmailAiAnalysis:
+		user_id: str
+		email_id: int
+		category: str
+		sentiment: str
+		summary: str
+		suggested_actions: list[str]
+		source: str
 
 
 @dataclass(frozen=True)
@@ -372,10 +406,35 @@ class EmailRepository(Protocol):
 				"""Insert email if new; return EmailId. Must be idempotent on (user_id, mailbox_message_id)."""
 				...
 
-		def list_emails(self, *, user_id: str, limit: int, cursor_received_at_utc: Optional[str]) -> list[EmailMessage]:
+		def list_emails(self, *, user_id: str, folder: str, limit: int, cursor_received_at_utc: Optional[str]) -> list[EmailMessage]:
 				...
 
 		def get_email(self, *, user_id: str, email_id: int) -> Optional[EmailMessage]:
+				...
+
+		def get_email_by_message_id(self, *, user_id: str, mailbox_message_id: str) -> Optional[EmailMessage]:
+				"""Resolve UI-facing Email.id (MailboxMessageId) to a stored email row."""
+				...
+
+		def set_read(self, *, user_id: str, mailbox_message_id: str, is_read: bool) -> None:
+				...
+
+
+class EmailAnalysisRepository(Protocol):
+		def get_analysis(self, *, user_id: str, email_id: int) -> Optional[EmailAiAnalysis]:
+				...
+
+		def upsert_analysis(self, *, user_id: str, email_id: int, category: str, sentiment: str, summary: str, suggested_actions: list[str], source: str) -> None:
+				...
+
+
+class AiRequestRepository(Protocol):
+		def add_request(self, *, user_id: str, email_id: int, prompt_text: str, response_text: str, source: str) -> int:
+				...
+
+
+class EmailActionRepository(Protocol):
+		def add_action_log(self, *, user_id: str, email_id: int, action: str, status: str) -> int:
 				...
 
 
@@ -440,7 +499,7 @@ classDiagram
 **Does not do**
 
 - Persist anything to storage (that is Persistence / Worker).
-- Classify content (that is Meeting/ReplyNeed modules).
+- Classify content (that is Email AI Analysis / AI Assistant modules).
 - Serve HTTP.
 
 ### Internal Architecture
@@ -542,14 +601,14 @@ classDiagram
 - Poll mailbox for new messages and ingest them.
 - Normalize and persist `emails` rows with plain-text body.
 - Download and persist metadata for attachments; write `text/calendar` bytes to disk.
-- Trigger meeting classification exactly once per ingested `EmailId`.
+- Trigger email AI analysis exactly once per ingested `EmailId`.
 - Maintain per-user ingestion cursor (`ingestion_state`).
 
 **Does not do**
 
 - Serve HTTP requests.
 - Block API request threads.
-- Perform reply-need classification (on-demand only).
+- Perform AI assistant “custom request” calls (API-only).
 
 ### Internal Architecture
 
@@ -561,7 +620,7 @@ classDiagram
 	2. Uses `MailboxClient` to list + fetch new messages.
 	3. Parses RFC822 into `ParsedEmail` (subject/addresses/body + attachment parts).
 	4. Writes email + attachments using `UnitOfWork`.
-	5. Invokes `MeetingClassifier.classify(email_id)` if classification is missing.
+	5. Invokes `EmailAnalysisClassifier.classify_if_needed(email_id)` if analysis is missing.
 	6. Advances ingestion cursor only after persistence succeeds.
 
 **Mermaid diagram**
@@ -574,15 +633,15 @@ flowchart TB
 	Worker --> UoW[UnitOfWork]
 	UoW --> Emails[(SQLite: emails/attachments)]
 	Worker --> Files[(Attachment Files)]
-	Worker --> Meet[MeetingClassifier]
-	Meet -->|store| MeetDB[(SQLite: meeting_classifications)]
+	Worker --> Analyze[EmailAnalysisClassifier]
+	Analyze -->|store| AiDB[(SQLite: email_ai_analysis)]
 ```
 
 **Senior-architect justification**
 
 - Cursor advancement after commit guarantees at-least-once ingestion without losing messages.
 - Idempotent upserts by `(user_id, mailbox_message_id)` prevent duplicates.
-- Meeting classification is executed off the request path, protecting API latency and UX.
+- AI analysis is executed off the request path, protecting API latency and UX.
 
 ### Data Abstraction
 
@@ -597,7 +656,7 @@ flowchart TB
 
 ### Storage Schemas
 
-- Uses: `emails`, `attachments`, `meeting_classifications`, `ingestion_state`.
+- Uses: `emails`, `attachments`, `email_ai_analysis`, `ingestion_state`.
 
 ### External API
 
@@ -628,7 +687,7 @@ classDiagram
 	IngestionWorker ..> EmailRepository
 	IngestionWorker ..> AttachmentRepository
 	IngestionWorker ..> IngestionStateRepository
-	IngestionWorker ..> MeetingClassifier
+	IngestionWorker ..> EmailAnalysisClassifier
 ```
 
 ---
@@ -665,7 +724,7 @@ flowchart TB
 
 **Senior-architect justification**
 
-- Keeps meeting prompts structured without relying on brittle free-text body parsing.
+- Keeps AI prompts structured without relying on brittle free-text body parsing.
 - Bounded scope matches sprint constraints and avoids calendar edge-case explosion.
 
 ### Data Abstraction
@@ -735,29 +794,29 @@ classDiagram
 
 ---
 
-## Module 6 — Shared LLM Utilities Module (`PromptBuilder`, `GeminiClient`, Validator, Throttle)
+## Module 6 — Shared LLM Utilities Module (`PromptBuilder`, `LlmClient`, Validator, Throttle)
 
 ### Features
 
 **Can do**
 
 - Build bounded prompts for:
-	- meeting-related classification (US2)
-	- reply-need classification (US3)
-- Call Gemini with retry/backoff and rate limiting.
-- Enforce strict JSON output schemas (reject invalid JSON, missing keys, wrong types, out-of-range confidence).
+	- email AI analysis (category/sentiment/summary/suggestedActions)
+	- AI assistant “custom request” for a specific email
+- Call an LLM provider with retry/backoff and rate limiting.
+- Enforce strict JSON output schemas for email AI analysis (reject invalid JSON, missing keys, wrong types, invalid enum values).
 
 **Does not do**
 
 - Persist classification results.
-- Decide business fallbacks (e.g., returning `UNSURE`)—services decide policy using validator outcomes.
+- Decide business fallbacks—services decide policy using validator outcomes.
 
 ### Internal Architecture
 
 **Text design**
 
 - `PromptBuilder` is a pure component that returns prompt text + schema contract.
-- `GeminiClient` wraps HTTP calls and returns raw model text.
+- `LlmClient` wraps HTTP calls and returns raw model text.
 - `StrictJsonValidator` validates and parses model text into typed dicts.
 - `RateLimiter` + `RetryPolicy` wrap both Gemini and mailbox calls (cross-cutting utilities).
 
@@ -765,10 +824,10 @@ classDiagram
 
 ```mermaid
 flowchart TB
-	Svc[Meeting/ReplyNeed Service] --> Prompt[PromptBuilder]
+	Svc[EmailAnalysis/AiAssistant Service] --> Prompt[PromptBuilder]
 	Svc --> Throttle[RateLimiter + RetryPolicy]
-	Throttle --> Gemini[GeminiClient]
-	Gemini -->|raw text| Validate[StrictJsonValidator]
+	Throttle --> LLM[LlmClient]
+	LLM -->|raw text| Validate[StrictJsonValidator]
 	Validate -->|typed result| Svc
 ```
 
@@ -801,7 +860,7 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class MeetingPromptInput:
+class EmailAnalysisPromptInput:
 	subject: str | None
 	from_addr: str | None
 	to_addrs: str | None
@@ -817,37 +876,34 @@ class MeetingPromptInput:
 
 
 @dataclass(frozen=True)
-class ReplyNeedPromptInput:
+class AiAssistantPromptInput:
 	subject: str | None
 	from_addr: str | None
-	to_addrs: str | None
-	cc_addrs: str | None
 	sent_at_utc: str | None
 	body_prefix: str
-	meeting_related: bool
-	meeting_confidence: float
+	user_prompt: str
 
 
 class PromptBuilder:
-	def build_meeting_prompt(self, *, input: MeetingPromptInput) -> str:
+	def build_email_analysis_prompt(self, *, input: EmailAnalysisPromptInput) -> str:
 		...
 
-	def build_reply_need_prompt(self, *, input: ReplyNeedPromptInput) -> str:
+	def build_ai_assistant_prompt(self, *, input: AiAssistantPromptInput) -> str:
 		...
 
 
 @dataclass(frozen=True)
-class GeminiResponse:
+class LlmResponse:
     raw_text: str
 
 
-class GeminiError(Exception):
+class LlmError(Exception):
     pass
 
 
-class GeminiClient:
-    def generate_json(self, *, prompt: str) -> GeminiResponse:
-        """Call Gemini and return raw text. Raises GeminiError on transport/auth errors."""
+class LlmClient:
+	def generate_text(self, *, prompt: str) -> LlmResponse:
+		"""Call the configured LLM provider and return raw text. Raises LlmError on transport/auth errors."""
         ...
 
 
@@ -856,16 +912,13 @@ class JsonValidationError(Exception):
 
 
 class StrictJsonValidator:
-    def validate_meeting(self, *, raw_text: str) -> dict[str, Any]:
-        ...
-
-    def validate_reply_need(self, *, raw_text: str) -> dict[str, Any]:
+	def validate_email_analysis(self, *, raw_text: str) -> dict[str, Any]:
         ...
 ```
 
 ### Declarations (Public vs Private)
 
-- **Public**: `PromptBuilder` methods, `GeminiClient.generate_json`, validator methods, error types
+- **Public**: `PromptBuilder` methods, `LlmClient.generate_text`, validator methods, error types
 - **Private**: HTTP transport details, backoff jitter strategy, schema-check helpers
 
 ### Mermaid Class Hierarchy
@@ -873,84 +926,90 @@ class StrictJsonValidator:
 ```mermaid
 classDiagram
 	class PromptBuilder {
-		+build_meeting_prompt(input: MeetingPromptInput) str
-		+build_reply_need_prompt(input: ReplyNeedPromptInput) str
+		+build_email_analysis_prompt(input: EmailAnalysisPromptInput) str
+		+build_ai_assistant_prompt(input: AiAssistantPromptInput) str
 	}
-	class GeminiClient {
-		+generate_json(prompt: str) GeminiResponse
+	class LlmClient {
+		+generate_text(prompt: str) LlmResponse
 	}
 	class StrictJsonValidator {
-		+validate_meeting(raw_text: str) dict
-		+validate_reply_need(raw_text: str) dict
+		+validate_email_analysis(raw_text: str) dict
 	}
-	class GeminiError
+	class LlmError
 	class JsonValidationError
-	GeminiClient ..> GeminiError : raises
+	LlmClient ..> LlmError : raises
 	StrictJsonValidator ..> JsonValidationError : raises
 ```
 
 ---
 
-## Module 7 — Meeting Classification Module (US2)
+## Module 7 — Email AI Analysis Module (Frontend `aiAnalysis`)
 
 ### Features
 
 **Can do**
 
-- Classify meeting-related intent for an email exactly once at ingestion time.
-- Persist `meetingRelated`, `confidence`, `rationale`, `source="gemini"`.
-- Provide read access to stored meeting status for API responses and reuse by US3.
+- Classify an email into the UI-required AI analysis fields exactly once per stored email.
+- Persist:
+	- `category`
+	- `sentiment`
+	- `summary`
+	- `suggestedActions`
+	- `source`
+- Provide read access to stored analysis for inclusion in email list/detail API responses.
 
 **Does not do**
 
 - Trigger mailbox ingestion (worker does that).
-- Run reply-needed classification.
+- Serve HTTP routes directly (controllers own REST).
+- Execute AI assistant “custom requests” (Module 8).
 
 ### Internal Architecture
 
 **Text design**
 
-- `MeetingClassifier` builds a structured prompt using:
+
+- `EmailAnalysisClassifier` builds a structured prompt using:
 	- subject/from/to/cc/sentAt
-	- first 2,000 chars of body
+	- a bounded body prefix
 	- extracted ICS fields when present
-- Calls `GeminiClient`, validates with `StrictJsonValidator`, and writes to `meeting_classifications`.
-- `MeetingService` reads meeting status by `EmailId` and provides default values when absent.
+- Calls `LlmClient`, validates with `StrictJsonValidator.validate_email_analysis`, and writes to `email_ai_analysis`.
+- `EmailAnalysisService` reads analysis by `EmailId` and provides deterministic defaults when absent.
 
 **Mermaid diagram**
 
 ```mermaid
 flowchart TB
-	Worker[IngestionWorker] --> Classifier[MeetingClassifier]
+	Worker[IngestionWorker] --> Classifier[EmailAnalysisClassifier]
 	Classifier --> Prompt[PromptBuilder]
-	Classifier --> Gemini[GeminiClient]
+	Classifier --> LLM[LlmClient]
 	Classifier --> Validate[StrictJsonValidator]
-	Classifier --> Repo[MeetingRepository]
-	Repo --> DB[(SQLite: meeting_classifications)]
-	API[MeetingApiController] --> Svc[MeetingService]
+	Classifier --> Repo[EmailAnalysisRepository]
+	Repo --> DB[(SQLite: email_ai_analysis)]
+	API[EmailApiController] --> Svc[EmailAnalysisService]
 	Svc --> Repo
 ```
 
 **Senior-architect justification**
 
-- Meeting classification is computed once per email to reduce cost and keep feed fast.
-- Separating `Classifier` (write path) from `Service` (read path) makes caching and default semantics explicit.
-- Prompt inputs are bounded (2,000 chars) to keep latency/cost predictable.
+- AI analysis is computed once per email to reduce LLM cost and keep the feed fast.
+- Separating `Classifier` (write path) from `Service` (read path) makes caching and deterministic default semantics explicit.
+- Prompt inputs are bounded to keep latency/cost predictable.
 
 ### Data Abstraction
 
-- **ADT**: `MeetingService`
-- **Abstract state**: mapping `(user_id, email_id) -> MeetingStatus`.
-- **Rep**: `meeting_classifications` row keyed by `(user_id, email_id)`.
-- **Rep invariant**: at most one classification per `(user_id, email_id)`; `confidence ∈ [0,1]`.
+- **ADT**: `EmailAnalysisService`
+- **Abstract state**: mapping `(user_id, email_id) -> EmailAiAnalysis`.
+- **Rep**: `email_ai_analysis` row keyed by `(user_id, email_id)`.
+- **Rep invariant**: at most one analysis per `(user_id, email_id)`; enums always in the frontend-defined sets.
 
 ### Stable Storage
 
-- SQLite `meeting_classifications` (plus `emails`/`attachments` to construct prompts).
+- SQLite `email_ai_analysis` (plus `emails`/`attachments` to construct prompts).
 
 ### Storage Schemas
 
-- Uses: `meeting_classifications` (defined in Module 2 DDL).
+- Uses: `email_ai_analysis` (defined in Module 2 DDL).
 
 ### External API
 
@@ -962,123 +1021,132 @@ from typing import Optional
 
 
 @dataclass(frozen=True)
-class MeetingStatus:
-	meeting_related: bool
-	confidence: float
-	rationale: Optional[str]
+class EmailAiAnalysisResult:
+	category: str
+	sentiment: str
+	summary: str
+	suggested_actions: list[str]
 	source: str
 
 
-class MeetingService:
-	def get_status(self, *, user_id: str, email_id: int) -> MeetingStatus:
-		"""Return stored status or safe defaults when absent."""
+class EmailAnalysisService:
+	def get_analysis(self, *, user_id: str, email_id: int) -> EmailAiAnalysisResult:
+		"""Return stored analysis or deterministic defaults when absent."""
 		...
 
-	def get_status_by_message_id(self, *, user_id: str, mailbox_message_id: str) -> MeetingStatus:
-		"""Resolve messageId -> EmailId using the emails table, then return MeetingStatus."""
+	def get_analysis_by_message_id(self, *, user_id: str, mailbox_message_id: str) -> EmailAiAnalysisResult:
+		"""Resolve UI Email.id (MailboxMessageId) -> EmailId, then return analysis."""
 		...
 ```
 
 **REST API (external callers: web app)**
 
-- `GET /api/meeting/check?messageId=<MailboxMessageId>`
-	- Auth: Bearer token required
-	- Response 200:
-		- `{ "messageId": "...", "meetingRelated": true, "confidence": 0.87, "rationale": "...", "source": "gemini" }`
-	- Response 404: email not found for user
+The frontend UI expects `aiAnalysis` to be included inline in the email list/detail endpoints (Module 9). No dedicated `/api/ai-analysis/*` endpoint is required.
 
 ### Declarations (Public vs Private)
 
-- **Public**: `MeetingClassifier.classify_if_needed`, `MeetingService.get_status`, `MeetingService.get_status_by_message_id`, `MeetingStatus`
+- **Public**: `EmailAnalysisClassifier.classify_if_needed`, `EmailAnalysisService.get_analysis`, `EmailAnalysisService.get_analysis_by_message_id`, `EmailAiAnalysisResult`
 - **Private**: prompt-input extraction helpers, truncation logic, DB upsert SQL
 
 ### Mermaid Class Hierarchy
 
 ```mermaid
 classDiagram
-	class MeetingClassifier {
+	class EmailAnalysisClassifier {
 		+classify_if_needed(user_id: str, email_id: EmailId) None
 	}
-	class MeetingService {
-		+get_status(user_id: str, email_id: EmailId) MeetingStatus
-		+get_status_by_message_id(user_id: str, mailbox_message_id: str) MeetingStatus
+	class EmailAnalysisService {
+		+get_analysis(user_id: str, email_id: EmailId) EmailAiAnalysisResult
+		+get_analysis_by_message_id(user_id: str, mailbox_message_id: str) EmailAiAnalysisResult
 	}
-	class MeetingStatus {
-		+meeting_related: bool
-		+confidence: float
-		+rationale: str?
+	class EmailAiAnalysisResult {
+		+category: str
+		+sentiment: str
+		+summary: str
+		+suggested_actions: list~str~
 		+source: str
 	}
-	MeetingClassifier ..> PromptBuilder
-	MeetingClassifier ..> GeminiClient
-	MeetingClassifier ..> StrictJsonValidator
-	MeetingClassifier ..> MeetingRepository
-	MeetingService ..> MeetingRepository
+	EmailAnalysisClassifier ..> PromptBuilder
+	EmailAnalysisClassifier ..> LlmClient
+	EmailAnalysisClassifier ..> StrictJsonValidator
+	EmailAnalysisClassifier ..> EmailAnalysisRepository
+	EmailAnalysisService ..> EmailAnalysisRepository
 ```
 
 ---
 
-## Module 8 — Reply-Need Module (US3)
+## Module 8 — AI Assistant + Email Actions Module (Frontend interactions)
 
 ### Features
 
 **Can do**
 
-- On-demand reply-needed classification by `messageId`.
-- Cache results in SQLite by `(userId, messageId)` (implemented as a lookup/join via the `emails` table, since classifications are stored by `email_id`).
-- Reuse US2 meeting signal through `MeetingService`.
-- Accept user feedback and store it for later evaluation.
-- Deterministic failure behavior returning `UNSURE` (see architecture).
+- Handle the frontend “Custom Request” interaction for a specific email.
+	- Input: `{ emailId, prompt }`
+	- Output: `{ emailId, responseText }`
+- Handle the frontend “Suggested Actions” click interaction.
+	- Input: `{ emailId, action }`
+	- Output: `{ emailId, action, status: "ok" }`
+- Optionally store request/action logs for evaluation and debugging.
 
 **Does not do**
 
 - Run automatically during ingestion.
-- Auto-send replies.
+- Modify frontend state directly (it only returns responses).
+- Require frontend-side LLM calls.
 
 ### Internal Architecture
 
 **Text design**
 
-- `ReplyNeedService.classify(email_id)`:
-	1. Checks cache in `reply_need_classifications`.
-	2. Reads meeting status from `MeetingService`.
-	3. Builds prompt and calls Gemini.
-	4. Validates strict JSON.
-	5. Applies deterministic fallback rules (including `REPLY_NEED_MIN_CONFIDENCE`).
-	6. Persists result.
-- `ReplyNeedService.submit_feedback(...)` writes `reply_need_feedback`.
+- `AiAssistantService.run_request(user_id, mailbox_message_id, prompt)`:
+	1. Resolves `mailbox_message_id` → `EmailId` via `EmailRepository`.
+	2. Builds a bounded prompt via `PromptBuilder.build_ai_assistant_prompt`.
+	3. Calls `LlmClient.generate_text`.
+	4. Stores `{prompt_text, response_text}` in `ai_requests` (optional but recommended).
+	5. Returns `responseText`.
+
+- `EmailActionService.execute(user_id, mailbox_message_id, action)`:
+	1. Resolves `mailbox_message_id` → `EmailId`.
+	2. Optionally performs a server-side operation (MVP: log + ack).
+	3. Stores an action log row in `email_action_logs` (optional but recommended).
+	4. Returns `{status: "ok"}`.
 
 **Mermaid diagram**
 
 ```mermaid
 flowchart TB
-	API[ReplyNeedApiController] --> Svc[ReplyNeedService]
-	Svc --> Cache[(SQLite: reply_need_classifications)]
-	Svc --> Meet[MeetingService]
-	Svc --> Prompt[PromptBuilder]
-	Svc --> Gemini[GeminiClient]
-	Svc --> Validate[StrictJsonValidator]
-	Svc --> Store[(SQLite: reply_need_classifications)]
-	API --> FB[submit feedback]
-	FB --> FBStore[(SQLite: reply_need_feedback)]
+	API[AiAssistantApiController] --> AiSvc[AiAssistantService]
+	API2[EmailActionApiController] --> ActSvc[EmailActionService]
+	AiSvc --> EmailRepo[EmailRepository]
+	AiSvc --> Prompt[PromptBuilder]
+	AiSvc --> LLM[LlmClient]
+	AiSvc --> ReqRepo[AiRequestRepository]
+	ReqRepo --> ReqDB[(SQLite: ai_requests)]
+	ActSvc --> EmailRepo
+	ActSvc --> ActRepo[EmailActionRepository]
+	ActRepo --> ActDB[(SQLite: email_action_logs)]
 ```
 
 **Senior-architect justification**
 
-- On-demand classification controls cost and keeps browsing fast.
-- Caching by `(userId, messageId)` eliminates repeat Gemini calls.
-- Deterministic fallback behavior makes the system testable and reliable under LLM failures.
+- Custom requests are on-demand and bounded, keeping latency/cost explicit.
+- Logging requests/actions enables evaluation without changing the UI.
+- Deterministic fallback behavior (“best-effort responseText”) keeps the UI responsive under LLM failures.
 
 ### Data Abstraction
 
-- **ADT**: `ReplyNeedService`
-- **Abstract state**: mapping `(user_id, mailbox_message_id) -> ReplyNeedResult`, plus a set of feedback records.
-- **Rep**: rows in `reply_need_classifications` and `reply_need_feedback`.
-- **Rep invariant**: at most one classification per `(user_id, email_id)`; reasons list size 1..3 encoded in `reasons_json`.
+- **ADT**: `AiAssistantService`
+	- **Abstract state**: pure function of `(email context, user prompt) -> responseText`, with optional persisted request logs.
+	- **Rep**: rows in `ai_requests` (optional).
+
+- **ADT**: `EmailActionService`
+	- **Abstract state**: acknowledgements for actions applied (or logged) against an email.
+	- **Rep**: rows in `email_action_logs` (optional).
 
 ### Stable Storage
 
-- SQLite tables: `reply_need_classifications`, `reply_need_feedback`.
+- SQLite tables: `ai_requests` (optional), `email_action_logs` (optional).
 
 ### Storage Schemas
 
@@ -1088,66 +1156,63 @@ flowchart TB
 
 **REST API (external callers: web app)**
 
-- `POST /api/reply-need`
-	- Auth: Bearer token required
-	- Request: `{ "messageId": "..." }`
+- `POST /api/ai/request`
+	- Auth: depends on Module 1 mode
+	- Request: `{ "emailId": "<MailboxMessageId>", "prompt": "..." }`
 	- Response 200:
-		- `{ "messageId": "...", "label": "NEEDS_REPLY", "confidence": 0.78, "reasons": ["..."], "source": "gemini" }`
+		- `{ "emailId": "...", "responseText": "..." }`
 
-- `POST /api/reply-need/feedback`
-	- Auth: Bearer token required
-	- Request: `{ "messageId": "...", "userLabel": "NO_REPLY_NEEDED", "comment": "optional" }`
-	- Response 204: stored
+- `POST /api/email-actions`
+	- Auth: depends on Module 1 mode
+	- Request: `{ "emailId": "<MailboxMessageId>", "action": "..." }`
+	- Response 200:
+		- `{ "emailId": "...", "action": "...", "status": "ok" }`
 
 **Internal (service) API**
 
 ```python
 from dataclasses import dataclass
-from typing import Literal
-
-
-ReplyNeedLabel = Literal["NEEDS_REPLY", "NO_REPLY_NEEDED", "UNSURE"]
 
 
 @dataclass(frozen=True)
-class ReplyNeedResult:
-    label: ReplyNeedLabel
-    confidence: float
-    reasons: list[str]
-    source: str
+class AiRequestResult:
+	response_text: str
+	source: str
 
 
-class ReplyNeedService:
-    def classify(self, *, user_id: str, mailbox_message_id: str) -> ReplyNeedResult:
-        ...
+class AiAssistantService:
+	def run_request(self, *, user_id: str, mailbox_message_id: str, prompt: str) -> AiRequestResult:
+		...
 
-    def submit_feedback(self, *, user_id: str, mailbox_message_id: str, user_label: Literal["NEEDS_REPLY", "NO_REPLY_NEEDED"], comment: str | None) -> None:
-        ...
+
+class EmailActionService:
+	def execute(self, *, user_id: str, mailbox_message_id: str, action: str) -> None:
+		...
 ```
 
 ### Declarations (Public vs Private)
 
-- **Public**: `ReplyNeedService.classify`, `ReplyNeedService.submit_feedback`, `ReplyNeedResult`
-- **Private**: JSON encoding/decoding of reasons, confidence threshold check, cache lookup SQL
+- **Public**: `AiAssistantService.run_request`, `EmailActionService.execute`, `AiRequestResult`
+- **Private**: prompt-context extraction helpers, request/action logging details
 
 ### Mermaid Class Hierarchy
 
 ```mermaid
 classDiagram
-	class ReplyNeedService {
-		+classify(user_id: str, mailbox_message_id: str) ReplyNeedResult
-		+submit_feedback(user_id: str, mailbox_message_id: str, user_label: str, comment: str?) None
+	class AiAssistantService {
+		+run_request(user_id: str, mailbox_message_id: str, prompt: str) AiRequestResult
 	}
-	class ReplyNeedResult {
-		+label: str
-		+confidence: float
-		+reasons: list~str~
+	class EmailActionService {
+		+execute(user_id: str, mailbox_message_id: str, action: str) None
+	}
+	class AiRequestResult {
+		+response_text: str
 		+source: str
 	}
-	ReplyNeedService ..> MeetingService
-	ReplyNeedService ..> PromptBuilder
-	ReplyNeedService ..> GeminiClient
-	ReplyNeedService ..> StrictJsonValidator
+	AiAssistantService ..> EmailRepository
+	AiAssistantService ..> PromptBuilder
+	AiAssistantService ..> LlmClient
+	EmailActionService ..> EmailRepository
 ```
 
 ---
@@ -1159,13 +1224,14 @@ classDiagram
 **Can do**
 
 - Serve email list (feed) and email detail views.
-- Require authentication for all content.
-- Read stored meeting classifications (no Gemini calls on browse).
+- Apply the selected auth mode (Module 1) for all content.
+- Read stored AI analysis (Module 7) and include it inline in responses.
+- Update email read/unread state.
 
 **Does not do**
 
 - Trigger mailbox ingestion.
-- Perform meeting or reply-need classification.
+- Perform LLM calls on browse paths (analysis is precomputed or provided via deterministic defaults).
 
 ### Internal Architecture
 
@@ -1173,7 +1239,7 @@ classDiagram
 
 - Controllers are thin: auth → service/repo calls → response DTO.
 - Email list queries are indexed by `(user_id, received_at_utc)`.
-- Email detail includes attachments metadata and meeting status if available.
+- Email detail includes attachments metadata (optional) and AI analysis.
 
 **Mermaid diagram**
 
@@ -1181,13 +1247,14 @@ classDiagram
 flowchart TB
 	UI[Web App] -->|GET /api/emails| Ctrl[EmailApiController]
 	UI -->|GET /api/emails/{emailId}| Ctrl
+	UI -->|PATCH /api/emails/{emailId}| Ctrl
 	Ctrl --> Auth[AuthTokenVerifier]
 	Ctrl --> EmailRepo[EmailRepository]
 	Ctrl --> AttRepo[AttachmentRepository]
-	Ctrl --> MeetSvc[MeetingService]
+	Ctrl --> AiSvc[EmailAnalysisService]
 	EmailRepo --> DB[(SQLite)]
 	AttRepo --> DB
-	MeetSvc --> DB
+	AiSvc --> DB
 ```
 
 **Senior-architect justification**
@@ -1204,7 +1271,7 @@ flowchart TB
 
 ### Stable Storage
 
-- SQLite tables: `emails`, `attachments`, `meeting_classifications`.
+- SQLite tables: `emails`, `attachments` (optional), `email_ai_analysis`.
 
 ### Storage Schemas
 
@@ -1212,14 +1279,46 @@ flowchart TB
 
 ### External API (REST)
 
-- `GET /api/emails?limit=50&cursor=<receivedAtUtc>`
-	- Auth required
-	- Response 200: `{ "items": [EmailSummary...], "nextCursor": "..." | null }`
+- `GET /api/emails?folder=<inbox|sent|drafts|trash|spam>&label=<optional>&limit=50&cursor=<receivedAtUtc>`
+	- Auth: depends on Module 1 mode
+	- Response 200:
+		- `{ "items": [Email...], "nextCursor": "..." | null }`
+		- Each `Email` must match the frontend `Email` interface, including `aiAnalysis`.
 
 - `GET /api/emails/{emailId}`
-	- Auth required
-	- Response 200: `EmailDetail`
+	- `emailId` is the UI-facing `MailboxMessageId` (same as `Email.id` in the frontend)
+	- Auth: depends on Module 1 mode
+	- Response 200: `Email`
 	- Response 404: not found
+
+- `PATCH /api/emails/{emailId}`
+	- Auth: depends on Module 1 mode
+	- Request body (MVP): `{ "read": true }`
+	- Response 204: updated
+
+**Email DTO (must match frontend `Email` interface)**
+
+```json
+{
+	"id": "<MailboxMessageId>",
+	"sender": { "name": "...", "email": "...", "avatar": "..." },
+	"subject": "...",
+	"preview": "...",
+	"body": "<html string or plaintext rendered as html>",
+	"date": "<ISO string>",
+	"read": false,
+	"folder": "inbox",
+	"labels": ["Work"],
+	"aiAnalysis": {
+		"category": "Work",
+		"sentiment": "neutral",
+		"summary": "...",
+		"suggestedActions": ["..."]
+	}
+}
+```
+
+Implementation note: to keep list payloads smaller, `GET /api/emails` may return `body=""` (empty string) while still returning `aiAnalysis.summary`.
 
 ### Declarations (Public vs Private)
 
@@ -1231,18 +1330,19 @@ flowchart TB
 ```mermaid
 classDiagram
 	class EmailApiController {
-		+list_emails(limit: int, cursor: str?) HttpResponse
-		+get_email(email_id: EmailId) HttpResponse
+		+list_emails(folder: str, label: str?, limit: int, cursor: str?) HttpResponse
+		+get_email(email_id: str) HttpResponse
+		+patch_email(email_id: str) HttpResponse
 	}
 	EmailApiController ..> AuthTokenVerifier
 	EmailApiController ..> EmailRepository
 	EmailApiController ..> AttachmentRepository
-	EmailApiController ..> MeetingService
+	EmailApiController ..> EmailAnalysisService
 ```
 
 ---
 
-## Module 10 — SMTP Outbound Mail Module (`SmtpClient`)
+## Module 10 — Compose + SMTP Outbound Mail Module (`SmtpClient`)
 
 ### Features
 
@@ -1251,11 +1351,11 @@ classDiagram
 - Connect to SMTP submission endpoint (STARTTLS/TLS as appropriate).
 - Authenticate using per-user app password.
 - Send outbound email messages (capability required by shared mailbox integration).
+- Support the frontend compose flow via a REST endpoint.
 
 **Does not do**
 
-- Automatically send emails for US2/US3 MVP.
-- Expose a public REST endpoint in MVP (unless the frontend includes a compose flow).
+- Automatically send emails based on AI analysis.
 
 ### Internal Architecture
 
@@ -1264,11 +1364,15 @@ classDiagram
 - `SmtpClient.send()` accepts a pre-built MIME message.
 - Network calls are wrapped with retry/backoff + rate limiting.
 
+- `ComposeApiController` (or a handler in `EmailApiController`) accepts the frontend payload and calls `SmtpClient`.
+	- Request: `{ "to": "...", "subject": "...", "body": "..." }`
+	- Response: `{ "id": "sent_<timestamp>", "to": "...", "subject": "..." }`
+
 **Mermaid diagram**
 
 ```mermaid
 flowchart TB
-	Caller[Future API / Internal Job] --> SMTP[SmtpClient]
+	Caller[Compose API] --> SMTP[SmtpClient]
 	SMTP --> Throttle[RateLimiter + Retry/Backoff]
 	SMTP -->|SMTP submission| Server[Mailbox Server (SMTP)]
 ```
@@ -1333,9 +1437,9 @@ This section ensures every named architecture component is covered by exactly on
 - `MailboxClient` → Module 3 (IMAP)
 - `IngestionWorker` → Module 4 (Worker)
 - `IcsExtractor` → Module 5 (ICS)
-- `PromptBuilder`, `GeminiClient`, `Strict JSON Output Validator`, `Rate Limiter + Retry/Backoff` → Module 6 (LLM Utilities)
-- `MeetingClassifier`, `MeetingService`, `MeetingApiController` → Module 7 (US2)
-- `ReplyNeedService`, `ReplyNeedApiController` → Module 8 (US3)
+- `PromptBuilder`, `LlmClient`, `Strict JSON Output Validator`, `Rate Limiter + Retry/Backoff` → Module 6 (LLM Utilities)
+- `EmailAnalysisClassifier`, `EmailAnalysisService` → Module 7 (Email AI Analysis)
+- `AiAssistantService`, `EmailActionService`, `AiAssistantApiController`, `EmailActionApiController` → Module 8 (AI Assistant + Actions)
 - `EmailApiController` → Module 9 (Email APIs)
-- `SmtpClient` → Module 10 (SMTP)
+- `SmtpClient`, `ComposeApiController` → Module 10 (Compose + SMTP)
 

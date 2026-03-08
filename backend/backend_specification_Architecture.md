@@ -3,12 +3,22 @@
 ## Architecture
 
 ### Objective
-Deliver one backend system that:
-- Ingests emails server-side from IMAP4rev1 and sends outbound mail via SMTP submission.
-- Classifies meeting-related intent (US2) at ingestion time using Gemini.
-- Classifies reply-needed intent (US3) on-demand using Gemini, reusing US2’s meeting signal.
-- Persists all emails, classifications, and feedback in one SQLite3 database.
-- Exposes a single REST surface to the web app.
+Deliver one backend system that supports the UI contract implemented in the frontend folder (AI Email Manager UX):
+
+- Serve an email feed and email detail view grouped by folder/label.
+- Persist email state required by the UI (read/unread, folder, labels).
+- Provide AI analysis shown in the reading pane sidebar:
+  - category (Work/Personal/Finance/Social/Promotions/Urgent)
+  - sentiment (positive/neutral/negative)
+  - summary
+  - suggestedActions (strings)
+- Support compose/send from the UI.
+- Support “Suggested action” execution (UI triggers an action string; backend acknowledges and can optionally persist a log).
+- Support “Custom Request” (UI sends a free-form prompt for one email and receives response text).
+
+Optional (implementation choice, not a UI requirement):
+- Ingest emails server-side from IMAP4rev1 and send outbound mail via SMTP submission.
+- Precompute AI analysis in a worker at ingestion time (instead of on-demand).
 
 ### System Boundary
 The backend is the only component that calls external services (IMAP, SMTP, and Gemini). The browser never calls IMAP, SMTP, or Gemini.
@@ -17,74 +27,76 @@ The backend is the only component that calls external services (IMAP, SMTP, and 
 The backend runs the same codebase in two concrete runtimes:
 
 1. **API Runtime (FastAPI + Uvicorn)**
-	 - Handles authenticated HTTP requests from the web app.
+	 - Handles HTTP requests from the web app.
 	 - Serves the email feed and email detail views.
-	 - Serves meeting-status reads (`GET /api/meeting/check`).
-	 - Serves reply-needed classification and feedback endpoints (`/api/reply-need/*`).
-	 - Never blocks request threads on mailbox ingestion.
+	 - Serves compose/send.
+	 - Serves AI analysis and AI assistant requests.
+	 - Never blocks request threads on mailbox ingestion (if a worker runtime is enabled).
 
-2. **Ingestion + Meeting-Classification Worker Runtime**
+	Minimum REST surface (matches the frontend mock service shapes):
+	- `GET /api/emails?folder=<inbox|sent|drafts|trash|spam>&label=<optional>`
+	- `GET /api/emails/{emailId}`
+	- `PATCH /api/emails/{emailId}` (e.g., mark read)
+	- `POST /api/send-email` with `{ to, subject, body }`
+	- `POST /api/email-actions` with `{ emailId, action }`
+	- `POST /api/ai/request` with `{ emailId, prompt }`
+
+2. **Ingestion + AI-Analysis Worker Runtime (Optional)**
 	 - Fetches new messages and relevant attachments from the mailbox via IMAP.
-	 - Normalizes and persists `EmailMessage` rows and attachment metadata.
-	 - Executes meeting-related classification exactly once per ingested email id.
-	 - Persists meeting classification output (`meetingRelated`, `confidence`, `rationale`, `source="gemini"`).
+	 - Normalizes and persists email records.
+	 - Executes AI analysis exactly once per ingested email id (category/sentiment/summary/suggestedActions).
+	 - Writes AI analysis results to SQLite for fast browsing.
 
 Both runtimes share:
 - The same SQLite3 database file (`data/outlookplus.db`) using WAL mode.
 - The same attachment directory (`data/attachments/...`) for `text/calendar` bytes.
-- The same Gemini client, prompt builder, strict JSON output validator, throttling, and retry policy.
-- The same classification configuration (including `REPLY_NEED_MIN_CONFIDENCE`).
+- The same LLM client, prompt builder, strict output validator, throttling, and retry policy (when an LLM is enabled).
 
 ### Core Components and Responsibilities
 
 **Auth Layer**
-- `AuthTokenVerifier` verifies `Authorization: Bearer <token>` and returns `userId`.
-- Every endpoint that returns email content or classifications requires authentication.
+The frontend bundle does not implement a login flow, so the backend must choose one of the following modes:
+
+- **Mode A (dev / demo):** no auth required (all requests treated as a single demo user).
+- **Mode B (dev stub):** `Authorization: Bearer dev:<userId>` (matches existing backend README).
+- **Mode C (production):** real token verification (JWT/opaque) returning a stable `userId`.
+
+Regardless of mode, downstream services should operate on a `userId`.
 
 **Persistence Layer (SQLite3 + Attachment Files)**
 - SQLite tables store:
-	- Emails (normalized metadata + plain-text body)
-	- Attachments (metadata + file paths; bytes stored on disk)
-	- Meeting classifications (US2)
-	- Reply-need classifications and user feedback (US3)
+	- Emails (UI fields: folder, read/unread, labels; plus metadata/body)
+	- Attachments (metadata + file paths; bytes stored on disk) (optional)
+	- AI analysis (category/sentiment/summary/suggestedActions)
+	- AI request/action logs (optional)
 	- Ingestion state (per-user last-seen IMAP UID + UIDVALIDITY)
 - All writes run inside transactions.
 - Attachment bytes are written under a file lock to prevent partial files.
 
 **Ingestion Pipeline (Worker Runtime)**
 - `MailboxClient` connects to the mailbox using IMAPS (TLS) and authenticates using a per-user App Password.
-- `IngestionWorker` fetches new messages, persists each email, downloads attachments with `contentType == "text/calendar"`, and then triggers meeting classification.
+- `IngestionWorker` fetches new messages, persists each email, downloads attachments with `contentType == "text/calendar"` (optional), and then triggers AI analysis classification (optional).
 - `IcsExtractor` parses the first `text/calendar` attachment and extracts `METHOD`, `SUMMARY`, `DTSTART`, `DTEND`, `ORGANIZER`, `LOCATION`.
 
 **Outbound Mail Capability (Shared Backend)**
 - `SmtpClient` connects to the mailbox SMTP submission endpoint and authenticates using a per-user App Password.
-- SMTP is required as part of the shared mailbox integration, even though US2/US3 do not define automatic sending in MVP scope.
+- SMTP is required to support the frontend compose flow and shared mailbox integration.
 
-**Meeting Detection (US2, Worker Runtime)**
-- `MeetingClassifier` builds a structured Gemini request using:
-	- subject, from, to, cc, sentAt
-	- first 2,000 characters of plain-text body
-	- extracted ICS fields when present
-- `GeminiClient` calls Gemini and requires a strict JSON response schema with:
-	- `meetingRelated: boolean`
-	- `confidence: number (0.0–1.0)`
-	- `rationale: string`
-- `MeetingService` reads stored results for API responses and internal reuse.
+**AI Analysis (Worker or API Runtime)**
+- `EmailAnalysisClassifier` builds a bounded prompt from:
+	- subject/from/to/cc/sentAt
+	- a bounded body prefix
+	- optional extracted ICS fields (when available)
+- LLM client returns a strict JSON schema:
+	- `category: "Work"|"Personal"|"Finance"|"Social"|"Promotions"|"Urgent"`
+	- `sentiment: "positive"|"neutral"|"negative"`
+	- `summary: string`
+	- `suggestedActions: string[]`
+- `EmailAnalysisService` reads stored results for API responses.
 
-**Reply-Needed Suggestion (US3, API Runtime)**
-- `ReplyNeedApiController` exposes:
-	- `POST /api/reply-need` to classify by `messageId`
-	- `POST /api/reply-need/feedback` to store user feedback
-- `ReplyNeedService` performs:
-	1. Cache lookup in SQLite for `(userId, messageId)`.
-	2. Read US2 meeting status through `MeetingService` (same database).
-	3. Prompt build and Gemini call with strict JSON output validation.
-	4. Persist the reply-need classification result in SQLite.
-- Reply-need output schema is:
-	- `label: "NEEDS_REPLY" | "NO_REPLY_NEEDED" | "UNSURE"`
-	- `confidence: number (0.0–1.0)`
-	- `reasons: string[1..3]`
-- Failure behavior is deterministic: the service returns `UNSURE` when Gemini fails, output validation fails, or `confidence < REPLY_NEED_MIN_CONFIDENCE`.
+**AI Assistant Requests (API Runtime)**
+- `AiAssistantService` accepts `{emailId, prompt}` and returns `responseText`.
+- The service may call an LLM or a rules-based mock, but it must not require frontend-side LLM calls.
 
 ### Mermaid Architecture Diagram (Unified Backend)
 
@@ -96,29 +108,31 @@ flowchart TB
 
 	subgraph Backend["OutlookPlus Backend (Single Codebase)"]
 		subgraph API["API Runtime (FastAPI)"]
-			EmailAPI["EmailApiController<br/>GET /api/emails<br/>GET /api/emails/{emailId}"]
-			MeetAPI["MeetingApiController<br/>GET /api/meeting/check"]
-			ReplyAPI["ReplyNeedApiController<br/>POST /api/reply-need<br/>POST /api/reply-need/feedback"]
-			Auth[AuthTokenVerifier]
-			ReplySvc[ReplyNeedService]
-			MeetSvc[MeetingService]
+			EmailAPI["EmailApiController<br/>GET /api/emails<br/>GET /api/emails/{emailId}<br/>PATCH /api/emails/{emailId}"]
+			ComposeAPI["ComposeApiController<br/>POST /api/send-email"]
+			ActionAPI["EmailActionApiController<br/>POST /api/email-actions"]
+			AiAPI["AiAssistantApiController<br/>POST /api/ai/request"]
+			Auth["Auth (Mode A/B/C)"]
+			AiSvc[AiAssistantService]
+			ActionSvc[EmailActionService]
+			AnalysisSvc[EmailAnalysisService]
 		end
 
-		subgraph Worker["Worker Runtime (Ingestion + US2)"]
+		subgraph Worker["Worker Runtime (Optional: Ingestion + AI analysis)"]
 			Ingest[IngestionWorker]
 			MailClient["MailboxClient (IMAP4rev1)"]
 			Ics[IcsExtractor]
-			MeetCls[MeetingClassifier]
+			AnalysisCls[EmailAnalysisClassifier]
 		end
 
-		subgraph MailOut["Outbound Mail (SMTP Submission)"]
+		subgraph MailOut["Outbound Mail (SMTP Submission, optional)"]
 			SmtpClient["SmtpClient (SMTP submission)"]
 		end
 
 		subgraph Shared[Shared Libraries]
 			Prompt[PromptBuilder]
-			Gemini[GeminiClient]
-			Validate[Strict JSON Output Validator]
+			LLM["LLM Client (Gemini or other)"]
+			Validate["Strict Output Validator"]
 			Throttle[Rate Limiter + Retry/Backoff]
 		end
 	end
@@ -135,23 +149,25 @@ flowchart TB
 	end
 
 	%% Client -> API
-	UI -->|HTTPS + Bearer token| EmailAPI
-	UI -->|HTTPS + Bearer token| MeetAPI
-	UI -->|HTTPS + Bearer token| ReplyAPI
+	UI -->|HTTPS| EmailAPI
+	UI -->|HTTPS| ComposeAPI
+	UI -->|HTTPS| ActionAPI
+	UI -->|HTTPS| AiAPI
 
 	%% API internals
 	EmailAPI --> Auth
-	MeetAPI --> Auth
-	ReplyAPI --> Auth
+	ComposeAPI --> Auth
+	ActionAPI --> Auth
+	AiAPI --> Auth
 	EmailAPI --> DB
-	MeetAPI --> MeetSvc
-	MeetSvc --> DB
-	ReplyAPI --> ReplySvc
-	ReplySvc --> DB
-	ReplySvc --> MeetSvc
-	ReplySvc --> Prompt
-	ReplySvc --> Gemini
-	ReplySvc --> Validate
+	EmailAPI --> AnalysisSvc
+	AnalysisSvc --> DB
+	ActionAPI --> ActionSvc
+	ActionSvc --> DB
+	AiAPI --> AiSvc
+	AiSvc --> Prompt
+	AiSvc --> LLM
+	AiSvc --> Validate
 
 	%% Worker pipeline
 	Ingest --> MailClient
@@ -160,12 +176,12 @@ flowchart TB
 	Ingest --> DB
 	Ingest --> Files
 	Ingest --> Ics
-	Ingest --> MeetCls
-	MeetCls --> Prompt
-	MeetCls --> Gemini
-	MeetCls --> Validate
-	Gemini -->|HTTPS| GemAPI
-	MeetCls --> DB
+	Ingest --> AnalysisCls
+	AnalysisCls --> Prompt
+	AnalysisCls --> LLM
+	AnalysisCls --> Validate
+	LLM -->|HTTPS| GemAPI
+	AnalysisCls --> DB
 
 	%% Cross-cutting
 	Throttle --- Gemini
@@ -178,18 +194,18 @@ flowchart TB
 	 - Email content and classifications traverse only one trust boundary (browser → backend). IMAP, SMTP, and Gemini remain strictly server-side, aligning with NFRs that prohibit frontend LLM calls and reduce credential exposure.
 
 2. **Two runtimes, one codebase: isolates latency and failure domains**
-	 - Ingestion and meeting classification execute outside the request path, so feed and detail endpoints remain stable under IMAP slowness, Gemini slowness, or Gemini retries. This directly protects UX while preserving a unified architecture.
+	 - If enabled, ingestion and AI analysis execute outside the request path, so feed and detail endpoints remain stable under IMAP slowness, LLM slowness, or LLM retries.
 
-3. **US2 at ingestion time; US3 on-demand: performance and cost are explicit**
-	 - Meeting detection runs once per new email id so the feed returns `meetingRelated` without triggering Gemini during browsing.
-	 - Reply-needed classification runs when the user requests it and caches results by `(userId, messageId)`, preventing repeated Gemini calls when reopening the same email.
+3. **Precompute vs on-demand AI is an explicit choice**
+	 - Precomputing analysis at ingestion time makes browsing fast and predictable.
+	 - On-demand analysis keeps ingestion simple but may increase read-time latency and cost.
 
 4. **Strict contracts keep LLM variability from leaking into product behavior**
-	 - Prompt inputs are bounded (body prefix capped at 2,000 characters; structured ICS fields when present).
-	 - Output validation enforces schema and safe fallback behavior (`UNSURE` for US3; missing meeting classification returns default values in the feed). These rules make failures predictable and testable.
+	 - Prompt inputs are bounded (e.g., body prefix capped; structured fields when present).
+	 - Output validation enforces schema so the UI always receives well-typed `aiAnalysis`.
 
 5. **Shared persistence and services remove duplicated work**
-	 - US3 depends on US2’s meeting signal; both features read/write the same SQLite store through service abstractions. This prevents re-classification and keeps cross-feature consistency (one stored truth per email).
+	 - Analysis, actions, and AI requests share the same email store and user boundary, keeping UI state consistent.
 
 6. **SQLite3 WAL mode matches the sprint scope while keeping correctness**
 	 - WAL mode plus transactional writes provide reliable concurrent access between the API runtime and the worker runtime with minimal operational burden. This architecture remains cohesive while meeting the “one sprint” complexity constraint.

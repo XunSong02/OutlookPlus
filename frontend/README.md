@@ -15,6 +15,19 @@
 
   Run `npm run dev` to start the development server.
 
+  ## Connect to OutlookPlus backend (FastAPI)
+
+  The UI can call the real backend APIs under `/api/...`.
+
+  Options:
+  - Dev proxy (default): Vite proxies `/api` to `http://127.0.0.1:8000`.
+    - Override target via `VITE_API_PROXY_TARGET`.
+  - Deploy / no proxy: set `VITE_API_URL` (or `VITE_API_BASE_URL`) to your backend base URL.
+
+  Example (PowerShell):
+  - `setx VITE_API_URL http://127.0.0.1:8000`
+  - Restart `npm run dev`
+
   ## Demo / Requirements Notes
 
   - Responsive design is implemented for at least two screen sizes:

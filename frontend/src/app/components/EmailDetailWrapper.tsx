@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { EmailDetail } from './EmailDetail';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -8,7 +8,8 @@ export function EmailDetailWrapper() {
   const { folder, emailId } = useParams();
   const navigate = useNavigate();
   const isMdUp = useMediaQuery('(min-width: 768px)');
-  const { emails, markRead } = useEmails();
+  const { emails, markRead, loadEmail } = useEmails();
+  const [isLoading, setIsLoading] = useState(false);
   const email = emails.find((e) => e.id === emailId);
 
   useEffect(() => {
@@ -16,7 +17,27 @@ export function EmailDetailWrapper() {
     markRead(emailId);
   }, [emailId, markRead]);
 
+  useEffect(() => {
+    if (!emailId) return;
+
+    setIsLoading(true);
+    loadEmail(emailId)
+      .catch((err) => {
+        console.error('Failed to load email detail from backend.', err);
+      })
+      .finally(() => setIsLoading(false));
+  }, [emailId, loadEmail]);
+
   if (!email) {
+    if (isLoading) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-gray-500">
+          <div className="text-lg font-medium">Loading email…</div>
+          <p className="text-sm">Fetching message details from the server.</p>
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col items-center justify-center h-full text-gray-500">
         <div className="text-lg font-medium">Email not found</div>
