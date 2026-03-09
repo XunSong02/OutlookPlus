@@ -157,35 +157,35 @@ The three-label system keeps the feature lightweight and safe. By including UNSU
 ```mermaid
 flowchart TB
   subgraph Client["Client (OutlookPlus Web App)"]
-    UI[Email Interface]
-    Display[Reply Suggestion Display]
+    UI["Email Interface"]
+    Display["Reply Suggestion Display"]
   end
 
   subgraph Server["Shared Backend (FastAPI)"]
-    Emails[EmailApiController]
-    ReplyApi[ReplyNeedApiController]
-    ReplySvc[ReplyNeedService]
-    MeetingSvc[MeetingService (US2)]
-    Gemini[GeminiClient]
-    Validator[OutputValidator]
+    Emails["EmailApiController"]
+    ReplyApi["ReplyNeedApiController"]
+    ReplySvc["ReplyNeedService"]
+    MeetingSvc["MeetingService (US2)"]
+    Gemini["GeminiClient"]
+    Validator["OutputValidator"]
   end
 
   subgraph Storage["Storage"]
-    DB[(SQLite3)]
+    DB[("SQLite3")]
   end
 
   subgraph External["External Services"]
     ImapSmtp["IMAP/SMTP Servers"]
-    GeminiApi[Gemini API]
+    GeminiApi["Gemini API"]
   end
 
-  UI -->|Open email| Emails
-  Emails -->|Read email| DB
+  UI -->|"Open email"| Emails
+  Emails -->|"Read email"| DB
   Emails --> UI
 
-  UI -->|POST /api/reply-need (messageId)| ReplyApi
+  UI -->|"POST /api/reply-need (messageId)"| ReplyApi
   ReplyApi --> ReplySvc
-  ReplySvc -->|Cache read/write| DB
+  ReplySvc -->|"Cache read/write"| DB
   ReplySvc --> MeetingSvc
   MeetingSvc --> DB
   ReplySvc --> Gemini
@@ -195,7 +195,7 @@ flowchart TB
   Validator --> ReplyApi
   ReplyApi --> Display
 
-  ImapSmtp -.->|Ingestion (server-side)| DB
+  ImapSmtp -.->|"Ingestion (server-side)"| DB
 ```
 
 ## Rationale
