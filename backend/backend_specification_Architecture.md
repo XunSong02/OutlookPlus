@@ -11,7 +11,7 @@ Deliver one backend system that supports the UI contract implemented in the fron
   - category (Work/Personal/Finance/Social/Promotions/Urgent)
   - sentiment (positive/neutral/negative)
   - summary
-  - suggestedActions (strings)
+  - suggestedActions (structured objects with kind, text, and optional draft)
 - Support compose/send from the UI.
 - Support “Suggested action” execution (UI triggers an action string; backend acknowledges and can optionally persist a log).
 - Support “Custom Request” (UI sends a free-form prompt for one email and receives response text).
@@ -106,7 +106,7 @@ Implementation note (current code): schema is initialized on startup and include
 	- `category: "Work"|"Personal"|"Finance"|"Social"|"Promotions"|"Urgent"`
 	- `sentiment: "positive"|"neutral"|"negative"`
 	- `summary: string`
-	- `suggestedActions: string[]`
+	- `suggestedActions`: array of objects `{ kind: "suggestion" | "reply_draft", text: string, draft: {to, subject, body} | null }`
 - `EmailAnalysisService` reads stored results for API responses.
 
 **AI Assistant Requests (API Runtime)**

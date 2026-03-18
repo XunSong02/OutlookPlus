@@ -47,7 +47,7 @@ Frontend-facing enums (must match the frontend bundle):
 **Failure and determinism rule (important for the frontend UI contract):**
 
 - AI analysis is stored once per `EmailId`.
-- The email list and detail endpoints must always return an `aiAnalysis` object with valid enum values. If the LLM is unavailable or output validation fails, the backend must return deterministic safe defaults (e.g., `category="Work"`, `sentiment="neutral"`, `summary` derived from subject/body prefix, and `suggestedActions=[]`).
+- The email list and detail endpoints must always return an `aiAnalysis` object with valid enum values. If the LLM is unavailable or output validation fails, the backend must return deterministic safe defaults (e.g., `category="Work"`, `sentiment="neutral"`, `summary` derived from subject/body prefix, and `suggestedActions` containing default structured suggestions).
 
 ---
 
@@ -1455,7 +1455,12 @@ flowchart TB
 		"category": "Work",
 		"sentiment": "neutral",
 		"summary": "...",
-		"suggestedActions": ["..."]
+		"suggestedActions": [
+			{
+				"kind": "suggestion",
+				"text": "..."
+			}
+		]
 	}
 }
 ```
