@@ -16,8 +16,23 @@ export interface Email {
     category: 'Work' | 'Personal' | 'Finance' | 'Social' | 'Promotions' | 'Urgent';
     sentiment: 'positive' | 'neutral' | 'negative';
     summary: string;
-    suggestedActions: string[];
+    suggestedActions: SuggestedAction[];
   };
 }
+
+export type SuggestedAction =
+  | {
+      kind: 'reply_draft';
+      text: string;
+      draft: {
+        to: string;
+        subject: string;
+        body: string;
+      };
+    }
+  | {
+      kind: 'suggestion';
+      text: string;
+    };
 
 export type FolderType = 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam';

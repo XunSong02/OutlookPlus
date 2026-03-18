@@ -1,13 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useParams } from 'react-router';
+import { Loader2 } from 'lucide-react';
 import { EmailDetail } from './EmailDetail';
-import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useEmails } from '../state/emails';
 
 export function EmailDetailWrapper() {
-  const { folder, emailId } = useParams();
-  const navigate = useNavigate();
-  const isMdUp = useMediaQuery('(min-width: 768px)');
+  const { emailId } = useParams();
   const { emails, markRead, loadEmail } = useEmails();
   const [isLoading, setIsLoading] = useState(false);
   const email = emails.find((e) => e.id === emailId);
@@ -31,7 +29,8 @@ export function EmailDetailWrapper() {
   if (!email) {
     if (isLoading) {
       return (
-        <div className="flex flex-col items-center justify-center h-full text-gray-500">
+        <div className="flex flex-col items-center justify-center h-full text-gray-500 space-y-3">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
           <div className="text-lg font-medium">Loading email…</div>
           <p className="text-sm">Fetching message details from the server.</p>
         </div>
@@ -47,16 +46,7 @@ export function EmailDetailWrapper() {
   }
 
   return (
-    <EmailDetail
-      email={email}
-      onClose={
-        isMdUp
-          ? undefined
-          : () => {
-              navigate(`/${folder ?? 'inbox'}`);
-            }
-      }
-    />
+    <EmailDetail email={email} />
   );
 }
 

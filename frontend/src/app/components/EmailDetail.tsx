@@ -1,47 +1,29 @@
 import React, { useState } from 'react';
 import { format } from 'date-fns';
 import { 
-    ArrowLeft,
-  Reply, 
-  ReplyAll, 
-  Forward, 
-  Archive, 
-  Trash, 
-  MoreHorizontal, 
-  Star, 
   Sparkles, 
   Bot, 
   Send,
-  ChevronRight
+  ChevronRight,
+  Reply,
+  Lightbulb
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 import { Email } from '../types';
 import { toast } from 'sonner';
-import { executeEmailAction, runAiRequest } from '../services/outlookplusApi';
+import { runAiRequest } from '../services/outlookplusApi';
+import { useCompose } from '../state/compose';
 
 interface EmailDetailProps {
   email: Email;
-  onClose?: () => void;
 }
 
-export function EmailDetail({ email, onClose }: EmailDetailProps) {
+export function EmailDetail({ email }: EmailDetailProps) {
   const [customAction, setCustomAction] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
 
-    const handleActionClick = async (action: string) => {
-        setIsProcessing(true);
-        try {
-            await executeEmailAction({ emailId: email.id, action });
-            toast.success(`Action executed: ${action}`);
-        } catch (err) {
-            console.error('Failed to execute email action via backend.', err);
-            toast.error('Failed to execute action');
-        } finally {
-            setIsProcessing(false);
-        }
-    };
+    const { openNewMessage } = useCompose();
 
     const handleCustomSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,73 +44,6 @@ export function EmailDetail({ email, onClose }: EmailDetailProps) {
 
   return (
     <div className="h-full flex flex-col bg-white">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-white sticky top-0 z-10">
-        <div className="flex items-center gap-2">
-                        {onClose && (
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                                aria-label="Back to message list"
-                                title="Back"
-                            >
-                                <ArrowLeft size={18} aria-hidden="true" />
-                            </button>
-                        )}
-                        <button
-                            type="button"
-                            className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                            aria-label="Reply"
-                            title="Reply"
-                        >
-                                <Reply size={18} aria-hidden="true" />
-                        </button>
-                        <button
-                            type="button"
-                            className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                            aria-label="Reply all"
-                            title="Reply All"
-                        >
-                                <ReplyAll size={18} aria-hidden="true" />
-                        </button>
-                        <button
-                            type="button"
-                            className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                            aria-label="Forward"
-                            title="Forward"
-                        >
-                                <Forward size={18} aria-hidden="true" />
-                        </button>
-        </div>
-        <div className="flex items-center gap-2">
-                         <button
-                             type="button"
-                             className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                             aria-label="Archive"
-                             title="Archive"
-                         >
-                                <Archive size={18} aria-hidden="true" />
-                        </button>
-                        <button
-                            type="button"
-                            className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                            aria-label="Delete"
-                            title="Delete"
-                        >
-                                <Trash size={18} aria-hidden="true" />
-                        </button>
-                         <button
-                             type="button"
-                             className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                             aria-label="More actions"
-                             title="More"
-                         >
-                                <MoreHorizontal size={18} aria-hidden="true" />
-                        </button>
-        </div>
-      </div>
-
             <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
         {/* Main Email Content */}
                 <div className="flex-1 overflow-y-auto p-4 sm:p-8 scroll-smooth">
@@ -140,14 +55,6 @@ export function EmailDetail({ email, onClose }: EmailDetailProps) {
                     <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-md">
                         {email.labels.join(', ')}
                     </span>
-                    <button
-                      type="button"
-                      className="text-gray-400 hover:text-yellow-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
-                      aria-label="Star message"
-                      title="Star"
-                    >
-                        <Star size={20} aria-hidden="true" />
-                    </button>
                 </div>
             </div>
 
@@ -227,17 +134,45 @@ export function EmailDetail({ email, onClose }: EmailDetailProps) {
                 <div>
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Suggested Actions</h3>
                     <div className="space-y-2">
-                        {email.aiAnalysis.suggestedActions.map((action, idx) => (
-                            <button
-                                key={idx}
-                                onClick={() => handleActionClick(action)}
-                                disabled={isProcessing}
-                                className="w-full text-left p-3 bg-white hover:bg-indigo-50 border border-gray-200 hover:border-indigo-200 rounded-lg text-sm text-gray-700 transition-all flex items-center justify-between group shadow-sm"
-                            >
-                                <span>{action}</span>
-                                <ChevronRight size={14} className="opacity-0 group-hover:opacity-100 text-indigo-400 transition-opacity" aria-hidden="true" />
-                            </button>
-                        ))}
+                                                {email.aiAnalysis.suggestedActions.map((action, idx) => {
+                                                    if (action.kind === 'reply_draft') {
+                                                        return (
+                                                            <button
+                                                                key={idx}
+                                                                onClick={() => openNewMessage(action.draft)}
+                                                                disabled={isProcessing}
+                                                                className="w-full text-left p-3 bg-white hover:bg-indigo-50 border border-gray-200 hover:border-indigo-200 rounded-lg text-sm text-gray-700 transition-all flex flex-col gap-1.5 group shadow-sm"
+                                                            >
+                                                                <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600">
+                                                                    <Reply size={14} />
+                                                                    <span>Suggested Reply</span>
+                                                                </div>
+                                                                <div className="flex items-center justify-between">
+                                                                    <span className="line-clamp-2">{action.text}</span>
+                                                                    <ChevronRight
+                                                                        size={14}
+                                                                        className="opacity-0 group-hover:opacity-100 text-indigo-400 transition-opacity flex-shrink-0 ml-2"
+                                                                        aria-hidden="true"
+                                                                    />
+                                                                </div>
+                                                            </button>
+                                                        );
+                                                    }
+
+                                                    return (
+                                                        <div
+                                                            key={idx}
+                                                            className="w-full text-left p-3 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 flex flex-col gap-1.5 shadow-sm"
+                                                            aria-label="Suggestion"
+                                                        >
+                                                            <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-600">
+                                                                <Lightbulb size={14} />
+                                                                <span>Suggested Action</span>
+                                                            </div>
+                                                            <span>{action.text}</span>
+                                                        </div>
+                                                    );
+                                                })}
                     </div>
                 </div>
 

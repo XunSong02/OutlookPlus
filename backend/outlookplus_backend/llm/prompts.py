@@ -81,6 +81,7 @@ class PromptBuilder:
     def build_email_analysis_prompt(
         self,
         *,
+        folder: str | None,
         subject: str | None,
         from_addr: str | None,
         to_addrs: str | None,
@@ -88,15 +89,22 @@ class PromptBuilder:
         sent_at_utc: str | None,
         body_prefix: str,
     ) -> str:
+        folder_norm = (folder or "").strip().lower() or "inbox"
         return (
             "You are a classifier for email category and sentiment, plus a brief summary and suggested actions.\n"
             "Return ONLY valid JSON matching this schema:\n"
             '{"category": "Work"|"Personal"|"Finance"|"Social"|"Promotions"|"Urgent", '
-            '"sentiment": "positive"|"neutral"|"negative", "summary": string, "suggestedActions": string[]}\n\n'
+            '"sentiment": "positive"|"neutral"|"negative", "summary": string, "suggestedActions": '
+            '[{ "kind": "reply_draft"|"suggestion", "text": string, "draft"?: {"to": string, "subject": string, "body": string} }]}\n\n'
             "Rules:\n"
             "- summary must be 1 to 2 sentences\n"
-            "- suggestedActions must be 0 to 5 short strings\n\n"
+            "- suggestedActions must be EXACTLY 3 items\n"
+            "- Each item's text must be brief (1-2 sentences)\n"
+            "- If folder is 'inbox', include EXACTLY 1 item with kind='reply_draft' and include draft.to, draft.subject, draft.body\n"
+            "- If folder is NOT 'inbox', ALL 3 items must have kind='suggestion' (no draft)\n"
+            "- Do not include markdown or code fences\n\n"
             "Email:\n"
+            f"folder: {folder_norm!r}\n"
             f"subject: {subject!r}\n"
             f"from: {from_addr!r}\n"
             f"to: {to_addrs!r}\n"

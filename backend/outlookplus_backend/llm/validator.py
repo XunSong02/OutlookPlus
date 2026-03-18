@@ -88,13 +88,40 @@ class StrictJsonValidator:
 
         actions = obj["suggestedActions"]
         _require(isinstance(actions, list), "suggestedActions must be list")
-        _require(len(actions) <= 5, "suggestedActions must be length 0..5")
-        _require(all(isinstance(a, str) and a.strip() for a in actions), "suggestedActions must be non-empty strings")
+        _require(len(actions) == 3, "suggestedActions must be length 3")
+
+        out_actions: list[dict[str, Any]] = []
+        for i, a in enumerate(actions):
+            _require(isinstance(a, dict), f"suggestedActions[{i}] must be object")
+            _require("kind" in a, f"suggestedActions[{i}] missing kind")
+            _require("text" in a, f"suggestedActions[{i}] missing text")
+            kind = a["kind"]
+            _require(isinstance(kind, str), f"suggestedActions[{i}].kind must be string")
+            _require(kind in {"reply_draft", "suggestion"}, f"suggestedActions[{i}].kind invalid")
+            text = a["text"]
+            _require(isinstance(text, str) and text.strip(), f"suggestedActions[{i}].text must be non-empty string")
+
+            if kind == "reply_draft":
+                _require("draft" in a, f"suggestedActions[{i}] missing draft")
+                draft = a["draft"]
+                _require(isinstance(draft, dict), f"suggestedActions[{i}].draft must be object")
+                for f in ("to", "subject", "body"):
+                    _require(f in draft, f"suggestedActions[{i}].draft missing {f}")
+                    _require(
+                        isinstance(draft[f], str) and str(draft[f]).strip(),
+                        f"suggestedActions[{i}].draft.{f} must be non-empty string",
+                    )
+                out_actions.append(
+                    {"kind": "reply_draft", "text": str(text), "draft": {"to": str(draft["to"]), "subject": str(draft["subject"]), "body": str(draft["body"])}}
+                )
+            else:
+                out_actions.append({"kind": "suggestion", "text": str(text), "draft": None})
+
         return {
             "category": category,
             "sentiment": sentiment,
             "summary": summary,
-            "suggestedActions": [str(a) for a in actions],
+            "suggestedActions": out_actions,
         }
 
     def validate_ai_request(self, *, raw_text: str) -> dict[str, Any]:

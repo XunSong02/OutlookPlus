@@ -10,6 +10,18 @@ AiCategory = Literal["Work", "Personal", "Finance", "Social", "Promotions", "Urg
 Sentiment = Literal["positive", "neutral", "negative"]
 
 
+class SuggestedActionDraftDto(BaseModel):
+    to: str
+    subject: str
+    body: str
+
+
+class SuggestedActionDto(BaseModel):
+    kind: Literal["reply_draft", "suggestion"]
+    text: str
+    draft: SuggestedActionDraftDto | None = None
+
+
 class EmailSenderDto(BaseModel):
     name: str
     email: str
@@ -20,7 +32,7 @@ class AiAnalysisDto(BaseModel):
     category: AiCategory
     sentiment: Sentiment
     summary: str
-    suggestedActions: list[str]
+    suggestedActions: list[SuggestedActionDto]
 
 
 class EmailDto(BaseModel):

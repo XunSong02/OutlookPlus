@@ -26,8 +26,6 @@ Source code (module-by-module dependencies + storage map):
 - SQLite (via Python stdlib `sqlite3`; no external DB server)
 - Local filesystem access (for the SQLite file and attachment storage)
 
-### Optional (feature-gated)
-
 - IMAP4 over TLS (worker ingestion) via Python stdlib `imaplib`
 - SMTP submission (outbound email) via Python stdlib `smtplib`
 - Google Gemini API (LLM features) via HTTPS using Python stdlib `urllib`
@@ -157,7 +155,7 @@ Env vars:
 Env vars:
 
 - `GEMINI_API_KEY` or `OUTLOOKPLUS_GEMINI_API_KEY`
-- `OUTLOOKPLUS_GEMINI_MODEL` (default in code: `gemini-1.5-flash`)
+- `OUTLOOKPLUS_GEMINI_MODEL`
 - `OUTLOOKPLUS_GEMINI_ENDPOINT` (optional; defaults to Google Generative Language API URL)
 - `REPLY_NEED_MIN_CONFIDENCE` (default: `0.65`)
 

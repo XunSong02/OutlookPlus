@@ -407,7 +407,7 @@ class EmailAnalysisRepositorySqlite:
             "category": str(r["category"]),
             "sentiment": str(r["sentiment"]),
             "summary": str(r["summary"]),
-            "suggestedActions": [str(a) for a in actions if isinstance(a, str)],
+            "suggestedActions": list(actions),
             "source": str(r["source"]),
         }
 
@@ -431,7 +431,7 @@ class EmailAnalysisRepositorySqlite:
                 "category": str(r["category"]),
                 "sentiment": str(r["sentiment"]),
                 "summary": str(r["summary"]),
-                "suggestedActions": [str(a) for a in actions if isinstance(a, str)],
+                "suggestedActions": list(actions),
                 "source": str(r["source"]),
             }
         return out
@@ -444,7 +444,7 @@ class EmailAnalysisRepositorySqlite:
         category: str,
         sentiment: str,
         summary: str,
-        suggested_actions: list[str],
+        suggested_actions: list[object],
         source: str,
     ) -> None:
         created_at = now_utc_rfc3339()

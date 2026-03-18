@@ -7,9 +7,14 @@ import { useEmails } from '../state/emails';
 interface ComposeModalProps {
   isOpen: boolean;
   onClose: () => void;
+  draft?: {
+    to?: string | null;
+    subject?: string | null;
+    body?: string | null;
+  } | null;
 }
 
-export function ComposeModal({ isOpen, onClose }: ComposeModalProps) {
+export function ComposeModal({ isOpen, onClose, draft }: ComposeModalProps) {
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -26,11 +31,24 @@ export function ComposeModal({ isOpen, onClose }: ComposeModalProps) {
   }, []);
 
   useEffect(() => {
-    // Treat each open as a fresh "New Message".
-    if (isOpen) {
+    if (!isOpen) return;
+
+    const nextTo = (draft?.to ?? '').trim();
+    const nextSubject = (draft?.subject ?? '').trim();
+    const nextBody = (draft?.body ?? '').trim();
+
+    // Treat opens without a draft as a fresh "New Message".
+    if (!nextTo && !nextSubject && !nextBody) {
       resetForm();
+      return;
     }
-  }, [isOpen, resetForm]);
+
+    setTo(nextTo);
+    setSubject(nextSubject);
+    setBody(nextBody);
+    setIsSending(false);
+    setIsAssisting(false);
+  }, [isOpen, draft, resetForm]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -82,7 +100,7 @@ export function ComposeModal({ isOpen, onClose }: ComposeModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="compose-title"
-        className="bg-white w-full max-w-2xl rounded-xl shadow-2xl flex flex-col h-[80vh] sm:h-auto overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+        className="bg-white w-full max-w-3xl rounded-xl shadow-2xl flex flex-col h-[85vh] sm:h-[85vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
       >
         
         {/* Header */}

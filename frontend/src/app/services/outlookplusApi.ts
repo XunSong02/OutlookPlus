@@ -73,11 +73,28 @@ export type EmailSenderDto = {
   avatar?: string | null;
 };
 
+export type SuggestedActionDraftDto = {
+  to: string;
+  subject: string;
+  body: string;
+};
+
+export type SuggestedActionDto =
+  | {
+      kind: 'reply_draft';
+      text: string;
+      draft: SuggestedActionDraftDto;
+    }
+  | {
+      kind: 'suggestion';
+      text: string;
+    };
+
 export type AiAnalysisDto = {
   category: 'Work' | 'Personal' | 'Finance' | 'Social' | 'Promotions' | 'Urgent';
   sentiment: 'positive' | 'neutral' | 'negative';
   summary: string;
-  suggestedActions: string[];
+  suggestedActions: Array<string | SuggestedActionDto>;
 };
 
 export type EmailDto = {

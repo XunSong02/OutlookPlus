@@ -38,6 +38,7 @@ from outlookplus_backend.wiring import (
     get_db,
     get_email_action_service,
     get_email_analysis_service,
+    get_email_analysis_classifier,
     get_meeting_service,
     get_reply_need_service,
     get_smtp_client,
@@ -118,7 +119,23 @@ def list_emails(
             "category": "Work",
             "sentiment": "neutral",
             "summary": "",
-            "suggestedActions": [],
+            "suggestedActions": [
+                {
+                    "kind": "suggestion",
+                    "text": "Ignore if no action is required.",
+                    "draft": None,
+                },
+                {
+                    "kind": "suggestion",
+                    "text": "Check what happened and confirm details.",
+                    "draft": None,
+                },
+                {
+                    "kind": "suggestion",
+                    "text": "Archive for reference.",
+                    "draft": None,
+                },
+            ],
         }
         items.append(
             EmailDto(
@@ -139,18 +156,24 @@ def list_emails(
     return EmailListResponse(items=items, nextCursor=next_cursor)
 
 
-@router.get("/emails/{email_id}", response_model=EmailDto)
 def get_email(
+    *,
     email_id: str,
-    user_id: str = Depends(require_user_id),
-    db: Db = Depends(get_db),
-    analysis_service=Depends(get_email_analysis_service),
+    user_id: str,
+    db: Db,
+    analysis_service,
+    analysis_classifier=None,
 ) -> EmailDto:
     with db.connect() as conn:
         email_repo = EmailRepositorySqlite(conn)
         email = email_repo.get_email_by_message_id(user_id=user_id, mailbox_message_id=email_id)
         if email is None:
             raise HTTPException(status_code=404, detail="Email not found")
+
+    # Lazy LLM classification on read (option 2). Only attempt when classifier is injected
+    # (route usage) and Gemini is configured (classifier checks env).
+    if analysis_classifier is not None:
+        analysis_classifier.classify_if_needed(user_id=user_id, email_id=email.id, allow_persist_default=False)
 
     ai = analysis_service.get_for_email(user_id=user_id, email=email)
     body = email.body_html or _body_to_html(email.body_text)
@@ -165,6 +188,23 @@ def get_email(
         folder=email.folder,  # type: ignore[arg-type]
         labels=list(email.labels),
         aiAnalysis=ai,  # type: ignore[arg-type]
+    )
+
+
+@router.get("/emails/{email_id}", response_model=EmailDto)
+def get_email_route(
+    email_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Db = Depends(get_db),
+    analysis_service=Depends(get_email_analysis_service),
+    analysis_classifier=Depends(get_email_analysis_classifier),
+) -> EmailDto:
+    return get_email(
+        email_id=email_id,
+        user_id=user_id,
+        db=db,
+        analysis_service=analysis_service,
+        analysis_classifier=analysis_classifier,
     )
 
 
