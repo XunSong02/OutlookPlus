@@ -157,35 +157,35 @@ The three-label system keeps the feature lightweight and safe. By including UNSU
 ```mermaid
 flowchart TB
   subgraph Client["Client (OutlookPlus Web App)"]
-    UI[Email Interface]
-    Display[Reply Suggestion Display]
+    UI["Email Interface"]
+    Display["Reply Suggestion Display"]
   end
 
   subgraph Server["Shared Backend (FastAPI)"]
-    Emails[EmailApiController]
-    ReplyApi[ReplyNeedApiController]
-    ReplySvc[ReplyNeedService]
-    MeetingSvc[MeetingService (US2)]
-    Gemini[GeminiClient]
-    Validator[OutputValidator]
+    Emails["EmailApiController"]
+    ReplyApi["ReplyNeedApiController"]
+    ReplySvc["ReplyNeedService"]
+    MeetingSvc["MeetingService (US2)"]
+    Gemini["GeminiClient"]
+    Validator["OutputValidator"]
   end
 
   subgraph Storage["Storage"]
-    DB[(SQLite3)]
+    DB[("SQLite3")]
   end
 
   subgraph External["External Services"]
     ImapSmtp["IMAP/SMTP Servers"]
-    GeminiApi[Gemini API]
+    GeminiApi["Gemini API"]
   end
 
-  UI -->|Open email| Emails
-  Emails -->|Read email| DB
+  UI -->|"Open email"| Emails
+  Emails -->|"Read email"| DB
   Emails --> UI
 
-  UI -->|POST /api/reply-need (messageId)| ReplyApi
+  UI -->|"POST /api/reply-need (messageId)"| ReplyApi
   ReplyApi --> ReplySvc
-  ReplySvc -->|Cache read/write| DB
+  ReplySvc -->|"Cache read/write"| DB
   ReplySvc --> MeetingSvc
   MeetingSvc --> DB
   ReplySvc --> Gemini
@@ -195,7 +195,7 @@ flowchart TB
   Validator --> ReplyApi
   ReplyApi --> Display
 
-  ImapSmtp -.->|Ingestion (server-side)| DB
+  ImapSmtp -.->|"Ingestion (server-side)"| DB
 ```
 
 ## Rationale
@@ -432,16 +432,16 @@ You could, but it would be hard to maintain. With separate classes, each one has
 # State Diagrams
 ```mermaid
 stateDiagram-v2
-  [*] --> Requested: User opens email
-  Requested --> CacheLookup: POST /api/reply-need
-  CacheLookup --> Shown: Cache hit
-  CacheLookup --> LlmCalling: Cache miss
-  LlmCalling --> Validating: Gemini response received
-  Validating --> Persisted: Store in SQLite
-  Persisted --> Shown: Return response
-  Shown --> FeedbackReceived: User gives feedback
-  Shown --> Done: User closes email
-  FeedbackReceived --> Done: Feedback stored
+  [*] --> Requested: "User opens email"
+  Requested --> CacheLookup: "POST /api/reply-need"
+  CacheLookup --> Shown: "Cache hit"
+  CacheLookup --> LlmCalling: "Cache miss"
+  LlmCalling --> Validating: "Gemini response received"
+  Validating --> Persisted: "Store in SQLite"
+  Persisted --> Shown: "Return response"
+  Shown --> FeedbackReceived: "User gives feedback"
+  Shown --> Done: "User closes email"
+  FeedbackReceived --> Done: "Feedback stored"
   Done --> [*]
 ```
 
@@ -477,25 +477,25 @@ Not for an MVP. We just need high-level states that the user cares about: email 
 # Flow Chart
 ```mermaid
 flowchart TD
-  A[User Opens Email] --> B[GET /api/emails/{emailId}]
-  B --> C[POST /api/reply-need (messageId)]
-  C --> D{SQLite cache hit?}
-  D -->|Yes| E[Return cached reply-need]
-  D -->|No| F[Lookup meeting-related via US2]
-  F --> G[Build Gemini prompt]
-  G --> H[Call Gemini API]
-  H --> I[Parse strict JSON]
-  I --> J[Validate output]
-  J --> K{Valid?}
-  K -->|Yes| L[Persist reply-need in SQLite]
-  K -->|No| M[Default to UNSURE]
+  A["User Opens Email"] --> B["GET /api/emails/emailId"]
+  B --> C["POST /api/reply-need (messageId)"]
+  C --> D{"SQLite cache hit?"}
+  D -->|Yes| E["Return cached reply-need"]
+  D -->|No| F["Lookup meeting-related via US2"]
+  F --> G["Build Gemini prompt"]
+  G --> H["Call Gemini API"]
+  H --> I["Parse strict JSON"]
+  I --> J["Validate output"]
+  J --> K{"Valid?"}
+  K -->|Yes| L["Persist reply-need in SQLite"]
+  K -->|No| M["Default to UNSURE"]
   M --> L
-  L --> N[Return result]
+  L --> N["Return result"]
   E --> N
-  N --> O[Display Suggestion]
-  O --> P{User Provides Feedback?}
-  P -->|Yes| Q[POST /api/reply-need/feedback]
-  P -->|No| R[Done]
+  N --> O["Display Suggestion"]
+  O --> P{"User Provides Feedback?"}
+  P -->|Yes| Q["POST /api/reply-need/feedback"]
+  P -->|No| R["Done"]
   Q --> R
 ```
 
