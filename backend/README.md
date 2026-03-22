@@ -28,7 +28,7 @@ Source code (module-by-module dependencies + storage map):
 
 - IMAP4 over TLS (worker ingestion) via Python stdlib `imaplib`
 - SMTP submission (outbound email) via Python stdlib `smtplib`
-- Google Gemini API (LLM features) via HTTPS using Python stdlib `urllib`
+- Google Gemini API (LLM features) via HTTPS using Python stdlib `urllib` (Vertex AI Platform)
 
 ## Data storage
 
