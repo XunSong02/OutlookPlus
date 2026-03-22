@@ -28,7 +28,7 @@ OUTLOOKPLUS_AUTH_MODE=A
 # Worker (run_worker.py)
 # -----------------------
 # Required for the worker loop.
-OUTLOOKPLUS_WORKER_USER_ID=demo
+OUTLOOKPLUS_WORKER_USER_ID=TA
 
 # -----------------------
 # IMAP ingestion (worker)
