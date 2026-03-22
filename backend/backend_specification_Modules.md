@@ -1561,9 +1561,24 @@ class SmtpClient:
 		def send(self, *, user_id: str, from_addr: str, to_addrs: list[str], mime_message_bytes: bytes) -> None:
 				"""Submit an email message via SMTP. Raises SmtpError on failure."""
 				...
+```
+---
+### Declarations (Public vs Private)
+
+- **Public**: `SmtpClient.send`, `SmtpError`
+- **Private**: connection/auth negotiation, STARTTLS logic
+
+### Mermaid Class Hierarchy
+````mermaid
+classDiagram
+	class SmtpClient {
+		+send(user_id: str, mime_message_bytes: bytes) None
+	}
+	class SmtpError
+	SmtpClient ..> SmtpError : raises
+````
 
 ---
-
 ## Module 11 — Meeting Classification Module (`MeetingClassifier`, `MeetingService`)
 
 ### Features
@@ -1730,10 +1745,11 @@ classDiagram
 ### External API (REST)
 
 - `POST /api/reply-need` with `{ messageId }`
-- `POST /api/reply-need/feedback` with `{ messageId, userLabel, comment? }` (returns 204)
 ```
-### Internal Architecture
+- `POST /api/reply-need/feedback` with `{ messageId, userLabel, comment? }` (returns 204)
 
+### Internal Architecture
+```
 **Text design**
 
 - `ReplyNeedService.classify(user_id, mailbox_message_id)`:
