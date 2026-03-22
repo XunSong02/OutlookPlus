@@ -168,12 +168,11 @@ flowchart TB
 	end
 
 	subgraph External[External Services]
-		Imap[Mailbox Server (IMAP)]
-		Smtp[Mailbox Server (SMTP)]
+		Imap["Mailbox Server (IMAP)"]
+		Smtp["Mailbox Server (SMTP)"]
 		GemAPI[Gemini API]
 	end
 
-	%% Client -> API
 	UI -->|HTTPS| EmailAPI
 	UI -->|HTTPS| ComposeAPI
 	UI -->|HTTPS| ActionAPI
@@ -181,7 +180,6 @@ flowchart TB
 	UI -->|HTTPS| MeetAPI
 	UI -->|HTTPS| ReplyAPI
 
-	%% API internals
 	EmailAPI --> Auth
 	ComposeAPI --> Auth
 	ActionAPI --> Auth
@@ -202,10 +200,9 @@ flowchart TB
 	ReplyAPI --> ReplySvc
 	ReplySvc --> DB
 
-	%% Worker pipeline
 	Ingest --> MailClient
-	MailClient -->|IMAPS (TLS)| Imap
-	SmtpClient -->|SMTP submission (STARTTLS/TLS)| Smtp
+	MailClient -->|IMAPS TLS| Imap
+	SmtpClient -->|SMTP submission STARTTLS| Smtp
 	Ingest --> DB
 	Ingest --> Files
 	Ingest --> Ics
@@ -220,10 +217,6 @@ flowchart TB
 	AnalysisCls --> Validate
 	LLM -->|HTTPS| GemAPI
 	AnalysisCls --> DB
-
-	%% Cross-cutting
-	Throttle --- Gemini
-	Throttle --- MailClient
 ```
 
 ### Design Justification (Senior Architect View)
