@@ -1732,6 +1732,133 @@ classDiagram
 - `POST /api/reply-need` with `{ messageId }`
 - `POST /api/reply-need/feedback` with `{ messageId, userLabel, comment? }` (returns 204)
 ```
+### Internal Architecture
+
+**Text design**
+
+- `ReplyNeedService.classify(user_id, mailbox_message_id)`:
+  1. Resolves `mailbox_message_id` → `email_id` via `EmailRepository.get_email_by_message_id`.
+  2. Checks `reply_need_classifications` for a cached row; returns immediately if present.
+  3. Loads the stored `EmailMessage`.
+  4. Calls `MeetingService.get_meeting_status` to obtain `meeting_related` and `meeting_confidence`.
+  5. Builds a `ReplyNeedPromptInput` and calls `PromptBuilder.build_reply_need_prompt`.
+  6. Calls `GeminiClient.generate_json` (wrapped in retry/backoff).
+  7. Validates via `StrictJsonValidator.validate_reply_need`.
+  8. On validation failure: stores `label="UNSURE"`, `confidence=0.0`, `reasons=["validation_error"]`.
+  9. Persists result to `reply_need_classifications` via `UnitOfWork`.
+  10. Returns `ReplyNeedResult`.
+
+- `ReplyNeedService.record_feedback(user_id, mailbox_message_id, user_label, comment)`:
+  1. Resolves `mailbox_message_id` → `email_id`.
+  2. Looks up the existing `classification_id` (nullable).
+  3. Inserts a row into `reply_need_feedback`.
+
+**Mermaid diagram**
+```mermaid
+flowchart TB
+    API[ReplyNeedApiController] --> Svc[ReplyNeedService]
+    Svc --> EmailRepo[EmailRepository]
+    Svc --> Cache[(SQLite: reply_need_classifications)]
+    Svc --> MeetSvc[MeetingService]
+    Svc --> Prompt[PromptBuilder]
+    Svc --> LLM[GeminiClient]
+    Svc --> Validate[StrictJsonValidator]
+    Svc --> UoW[UnitOfWork]
+    UoW --> Cache
+    UoW --> FeedbackDB[(SQLite: reply_need_feedback)]
+```
+
+**Senior-architect justification**
+
+- SQLite caching ensures the same email is never sent to Gemini twice, controlling cost and ensuring label consistency.
+- Incorporating `MeetingService` output into the prompt improves classification accuracy for meeting-related emails without re-running the LLM for meeting detection.
+- Defaulting to `UNSURE` on validation failure keeps the UI functional and honest under LLM variability.
+- Separating feedback persistence from classification keeps both paths independently testable.
+
+### Data Abstraction (6.005-style)
+
+- **ADT**: `ReplyNeedService`
+  - **Abstract state**: mapping `(user_id, mailbox_message_id) -> ReplyNeedResult`; feedback log per `(user_id, email_id)`.
+  - **Rep**: rows in `reply_need_classifications` keyed by `(user_id, email_id)`; rows in `reply_need_feedback`.
+  - **Rep invariant**: `label` ∈ `{"NEEDS_REPLY", "NO_REPLY_NEEDED", "UNSURE"}`; `confidence` ∈ [0.0, 1.0]; at most one classification row per `(user_id, email_id)`; `reasons` is a non-empty JSON array.
+
+### Stable Storage
+
+- SQLite tables: `reply_need_classifications`, `reply_need_feedback` (defined in Module 2 DDL).
+
+### Storage Schemas
+
+- Uses: `reply_need_classifications`, `reply_need_feedback`, `emails` (all defined in Module 2 DDL).
+
+### External API
+
+**Internal (service) API**
+```python
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass(frozen=True)
+class ReplyNeedResult:
+    message_id: str
+    label: str
+    confidence: float
+    reasons: list[str]
+    source: str
+    cached: bool
+
+
+class ReplyNeedService:
+    def classify(
+        self, *, user_id: str, mailbox_message_id: str
+    ) -> ReplyNeedResult:
+        """
+        Return cached classification if present; otherwise call Gemini and persist.
+        Always returns a valid result: defaults to UNSURE on Gemini/validation failure.
+        """
+        ...
+
+    def record_feedback(
+        self,
+        *,
+        user_id: str,
+        mailbox_message_id: str,
+        user_label: str,
+        comment: Optional[str] = None,
+    ) -> None:
+        """
+        Persist user feedback for offline evaluation.
+        user_label must be one of: NEEDS_REPLY, NO_REPLY_NEEDED.
+        """
+        ...
+```
+
+### Declarations (Public vs Private)
+
+- **Public**: `ReplyNeedService.classify`, `ReplyNeedService.record_feedback`, `ReplyNeedResult`
+- **Private**: cache-check logic, prompt-input extraction, DB upsert SQL, feedback linkage to `classification_id`
+
+### Mermaid Class Hierarchy
+```mermaid
+classDiagram
+    class ReplyNeedService {
+        +classify(user_id: str, mailbox_message_id: str) ReplyNeedResult
+        +record_feedback(user_id: str, mailbox_message_id: str, user_label: str, comment: str?) None
+    }
+    class ReplyNeedResult {
+        +message_id: str
+        +label: str
+        +confidence: float
+        +reasons: list~str~
+        +source: str
+        +cached: bool
+    }
+    ReplyNeedService ..> EmailRepository
+    ReplyNeedService ..> MeetingService
+    ReplyNeedService ..> PromptBuilder
+    ReplyNeedService ..> GeminiClient
+    ReplyNeedService ..> StrictJsonValidator
+```
 
 ### Declarations (Public vs Private)
 
