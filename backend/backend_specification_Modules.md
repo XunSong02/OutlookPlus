@@ -1584,6 +1584,137 @@ class SmtpClient:
 	- Response 200: `{ messageId, meetingRelated, confidence, rationale?, source }`
 	- Response 404: email not found
 
+### Internal Architecture
+
+**Text design**
+
+- `MeetingClassifier.classify_if_needed(user_id, email_id)`:
+  1. Checks `meeting_classifications` for an existing row; skips if already classified.
+  2. Loads the stored `EmailMessage` from `EmailRepository`.
+  3. Calls `AttachmentRepository.list_attachments` and filters for `content_type == "text/calendar"`.
+  4. If a calendar attachment exists, reads the bytes from disk and calls `IcsExtractor.extract`.
+  5. Builds a `MeetingPromptInput` via `PromptBuilder.build_meeting_prompt`.
+  6. Calls `GeminiClient.generate_json` (wrapped in retry/backoff).
+  7. Validates the raw response via `StrictJsonValidator.validate_meeting`.
+  8. Persists a `meeting_classifications` row via `UnitOfWork`.
+  9. On Gemini failure after retries: logs the error and returns without writing a row (best-effort).
+
+- `MeetingService.get_meeting_status(user_id, mailbox_message_id)`:
+  1. Resolves `mailbox_message_id` → `email_id` via `EmailRepository.get_email_by_message_id`.
+  2. Reads `meeting_classifications` row.
+  3. Returns the stored result, or a safe default (`meetingRelated=False`, `confidence=0.0`) if absent.
+
+**Mermaid diagram**
+```mermaid
+flowchart TB
+    Worker[IngestionWorker] --> Cls[MeetingClassifier]
+    Cls --> EmailRepo[EmailRepository]
+    Cls --> AttRepo[AttachmentRepository]
+    AttRepo --> Files[(Attachment Files)]
+    Cls --> Ics[IcsExtractor]
+    Cls --> Prompt[PromptBuilder]
+    Cls --> LLM[GeminiClient]
+    Cls --> Validate[StrictJsonValidator]
+    Cls --> UoW[UnitOfWork]
+    UoW --> DB[(SQLite: meeting_classifications)]
+    API[MeetingApiController] --> Svc[MeetingService]
+    Svc --> EmailRepo
+    Svc --> DB
+```
+
+**Senior-architect justification**
+
+- Best-effort classification (no stored row = safe default) prevents ingestion failures from blocking the feed.
+- Reusing `IcsExtractor` keeps calendar-parsing logic in one place and avoids prompt injection from raw ICS text.
+- Separating `MeetingClassifier` (write path, worker) from `MeetingService` (read path, API) mirrors the pattern in Module 7 and keeps API latency independent of LLM availability.
+
+### Data Abstraction (6.005-style)
+
+- **ADT**: `MeetingService`
+  - **Abstract state**: partial mapping `(user_id, mailbox_message_id) -> MeetingStatusResult`; undefined entries return safe defaults.
+  - **Rep**: rows in `meeting_classifications` keyed by `(user_id, email_id)`.
+  - **Rep invariant**: `confidence` ∈ [0.0, 1.0]; `source` is always `"gemini"`; at most one row per `(user_id, email_id)`.
+
+- **ADT**: `MeetingClassifier`
+  - **Abstract state**: a write-once classifier; idempotent (skips if row already exists).
+  - **Rep**: `meeting_classifications` row + underlying `GeminiClient` + `IcsExtractor`.
+  - **Rep invariant**: classify_if_needed never overwrites an existing row.
+
+### Stable Storage
+
+- SQLite table: `meeting_classifications` (defined in Module 2 DDL).
+- Attachment bytes on disk (read-only by this module; written by Module 4).
+
+### Storage Schemas
+
+- Uses: `meeting_classifications`, `emails`, `attachments` (all defined in Module 2 DDL).
+
+### External API
+
+**Internal (service) API**
+```python
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass(frozen=True)
+class MeetingStatusResult:
+    message_id: str
+    meeting_related: bool
+    confidence: float
+    rationale: Optional[str]
+    source: str
+
+
+class MeetingClassifier:
+    def classify_if_needed(self, *, user_id: str, email_id: int) -> None:
+        """
+        Classify meeting-relatedness for the given email if not already stored.
+        Best-effort: logs and returns silently on Gemini failure.
+        """
+        ...
+
+
+class MeetingService:
+    def get_meeting_status(
+        self, *, user_id: str, mailbox_message_id: str
+    ) -> MeetingStatusResult:
+        """
+        Return stored meeting classification, or safe defaults if absent.
+        Raises EmailNotFoundError if the email does not exist for this user.
+        """
+        ...
+```
+
+### Declarations (Public vs Private)
+
+- **Public**: `MeetingClassifier.classify_if_needed`, `MeetingService.get_meeting_status`, `MeetingStatusResult`
+- **Private**: prompt-input extraction helpers, ICS bytes retrieval, DB upsert SQL, retry logic
+
+### Mermaid Class Hierarchy
+```mermaid
+classDiagram
+    class MeetingClassifier {
+        +classify_if_needed(user_id: str, email_id: int) None
+    }
+    class MeetingService {
+        +get_meeting_status(user_id: str, mailbox_message_id: str) MeetingStatusResult
+    }
+    class MeetingStatusResult {
+        +message_id: str
+        +meeting_related: bool
+        +confidence: float
+        +rationale: str?
+        +source: str
+    }
+    MeetingClassifier ..> PromptBuilder
+    MeetingClassifier ..> GeminiClient
+    MeetingClassifier ..> StrictJsonValidator
+    MeetingClassifier ..> IcsExtractor
+    MeetingClassifier ..> AttachmentRepository
+    MeetingClassifier ..> EmailRepository
+    MeetingService ..> EmailRepository
+```
 ---
 
 ## Module 12 — Reply-Need Classification + Feedback Module (`ReplyNeedService`)
