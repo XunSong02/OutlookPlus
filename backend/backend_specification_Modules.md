@@ -87,10 +87,10 @@ Implementation notes (current code):
 
 ```mermaid
 flowchart TB
-	Req[HTTP Request] --> Extract[Extract Bearer Token]
-	Extract --> Verify[AuthTokenVerifier.verify()]
-	Verify -->|ok| UID[UserId]
-	Verify -->|fail| Err[HTTP 401/403]
+    Req[HTTP Request] --> Extract[Extract Bearer Token]
+    Extract --> Verify["AuthTokenVerifier.verify()"]
+    Verify -- ok --> UID[UserId]
+    Verify -- fail --> Err[HTTP 401/403]
 ```
 
 **Senior-architect justification**
@@ -593,11 +593,11 @@ Implementation note (current code): IMAP credentials are read from environment v
 
 ```mermaid
 flowchart TB
-	Caller[IngestionWorker] --> Client[MailboxClient]
-	Client -->|IMAPS| Server[Mailbox Server (IMAP)]
-	Client --> Throttle[RateLimiter + Retry/Backoff]
-	Client --> Parse[MIME Parser]
-	Parse --> Raw[RawMailboxMessage]
+    Caller[IngestionWorker] --> Client[MailboxClient]
+    Client -->|IMAPS TLS| Server["Mailbox Server (IMAP)"]
+    Client --> Throttle["RateLimiter + Retry/Backoff"]
+    Client --> Parse[MIME Parser]
+    Parse --> Raw[RawMailboxMessage]
 ```
 
 **Senior-architect justification**
@@ -1387,16 +1387,16 @@ classDiagram
 
 ```mermaid
 flowchart TB
-	UI[Web App] -->|GET /api/emails| Ctrl[EmailApiController]
-	UI -->|GET /api/emails/{emailId}| Ctrl
-	UI -->|PATCH /api/emails/{emailId}| Ctrl
-	Ctrl --> Auth[AuthTokenVerifier]
-	Ctrl --> EmailRepo[EmailRepository]
-	Ctrl --> AttRepo[AttachmentRepository]
-	Ctrl --> AiSvc[EmailAnalysisService]
-	EmailRepo --> DB[(SQLite)]
-	AttRepo --> DB
-	AiSvc --> DB
+    UI[Web App] -->|GET /api/emails| Ctrl[EmailApiController]
+    UI -->|GET /api/emails/emailId| Ctrl
+    UI -->|PATCH /api/emails/emailId| Ctrl
+    Ctrl --> Auth[AuthTokenVerifier]
+    Ctrl --> EmailRepo[EmailRepository]
+    Ctrl --> AttRepo[AttachmentRepository]
+    Ctrl --> AiSvc[EmailAnalysisService]
+    EmailRepo --> DB[(SQLite)]
+    AttRepo --> DB
+    AiSvc --> DB
 ```
 
 **Senior-architect justification**
@@ -1525,9 +1525,9 @@ Additional REST API (implemented):
 
 ```mermaid
 flowchart TB
-	Caller[Compose API] --> SMTP[SmtpClient]
-	SMTP --> Throttle[RateLimiter + Retry/Backoff]
-	SMTP -->|SMTP submission| Server[Mailbox Server (SMTP)]
+    Caller[Compose API] --> SMTP[SmtpClient]
+    SMTP --> Throttle["RateLimiter + Retry/Backoff"]
+    SMTP -->|SMTP submission| Server["Mailbox Server (SMTP)"]
 ```
 
 **Senior-architect justification**
