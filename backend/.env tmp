@@ -52,7 +52,7 @@ OUTLOOKPLUS_SMTP_PASSWORD=
 # -----------------------
 # Gemini (meeting + reply-need)
 # -----------------------
-# If not set, AI features will degrade gracefully. Should use Google Vertex AI Platform
+# If not set, AI features will degrade gracefully. 
 GEMINI_API_KEY=
 OUTLOOKPLUS_GEMINI_MODEL=gemini-3-flash-preview
 # OUTLOOKPLUS_GEMINI_ENDPOINT= 
