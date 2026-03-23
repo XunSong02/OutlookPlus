@@ -99,7 +99,7 @@ Auth behavior:
 	- `Authorization: Bearer dev:<userId>`
 	- OR `Authorization: Bearer <OUTLOOKPLUS_DEV_TOKEN>` (maps to `OUTLOOKPLUS_DEV_USER_ID`)
 
-### Start worker (optional)
+### Start worker
 
 Worker env vars:
 
