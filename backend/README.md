@@ -137,9 +137,9 @@ There is no background daemon/service wrapper included in this repo.
 
 On the next start, the API will recreate the schema automatically.
 
-## Optional integrations
+## integrations
 
-### SMTP (required only for `POST /api/send-email`)
+### SMTP
 
 The API endpoint `POST /api/send-email` returns HTTP 400 unless SMTP is configured.
 
@@ -150,7 +150,7 @@ Env vars:
 - `OUTLOOKPLUS_SMTP_USERNAME`
 - `OUTLOOKPLUS_SMTP_PASSWORD`
 
-### Gemini (optional; enables better classifications and AI responses)
+### Gemini
 
 Env vars:
 
