@@ -36,7 +36,7 @@ To launch the full stack locally, you will need to open terminal windows for bot
 ```bash
    python run_api.py
 ```
-   *The backend will be running at `http://127.0.0.1:8000`.*
+   
 5. Run the IMAP Ingestion Worker in another terminal:
 ```bash
    python run_worker.py
