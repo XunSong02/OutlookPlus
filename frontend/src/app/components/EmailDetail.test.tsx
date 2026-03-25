@@ -78,7 +78,7 @@ describe('EmailDetail XSS sanitization', () => {
     const link = screen.getByText('Click here');
     const href = link.getAttribute('href');
     // href should either be removed or not contain javascript:
-    expect(href).not.toMatch(/javascript:/i);
+    expect(href ?? '').not.toMatch(/javascript:/i);
   });
 
   it('strips iframe tags', () => {
