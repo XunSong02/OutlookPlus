@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import DOMPurify from 'dompurify';
 import { format } from 'date-fns';
 import { 
   Sparkles, 
@@ -77,7 +78,7 @@ export function EmailDetail({ email }: EmailDetailProps) {
             {/* Body */}
             <div 
                 className="prose prose-blue max-w-none text-gray-800 leading-relaxed font-serif text-lg"
-                dangerouslySetInnerHTML={{ __html: email.body }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(email.body) }}
             />
             
             {/* Attachments Placeholder */}
