@@ -55,6 +55,100 @@ To launch the full stack locally, you will need to open terminal windows for bot
    npm run dev
 ```
    *The frontend will be available at `http://localhost:5173` (or similar).* By default, any `/api` requests will proxy to the backend running at `127.0.0.1:8000`.
+
+---
+
+## Running Tests
+
+### Frontend Tests
+
+**Prerequisites:**
+- [Node.js](https://nodejs.org/) v18 or higher
+- npm (comes with Node.js)
+
+**Frameworks & libraries used:**
+- [Jest](https://jestjs.io/) (v30) -- test runner
+- [ts-jest](https://kulshekhar.github.io/ts-jest/) -- TypeScript support for Jest
+- [jest-environment-jsdom](https://www.npmjs.com/package/jest-environment-jsdom) -- browser DOM simulation
+- [@testing-library/react](https://testing-library.com/docs/react-testing-library/intro/) -- React component testing
+- [@testing-library/jest-dom](https://github.com/testing-library/jest-dom) -- custom DOM matchers
+
+**Steps:**
+
+1. Navigate to the frontend directory and install dependencies:
+   ```bash
+   cd frontend
+   npm install
+   ```
+
+2. Run the tests:
+   ```bash
+   npm test
+   ```
+
+3. Run the tests with code coverage report:
+   ```bash
+   npm run test:coverage
+   ```
+
+**Test files** are located in `frontend/tests/`:
+- `emails.test.ts` -- tests for the emails state management module
+- `outlookplusApi.test.ts` -- tests for the API client service
+
+---
+
+### Backend Tests
+
+**Prerequisites:**
+- [Python](https://www.python.org/) 3.10 or higher
+- pip (comes with Python)
+
+**Frameworks & libraries used:**
+- [unittest](https://docs.python.org/3/library/unittest.html) -- Python's built-in test framework (no extra install needed)
+- [coverage](https://coverage.readthedocs.io/) -- code coverage measurement
+
+**Steps:**
+
+1. Navigate to the backend directory, set up a virtual environment, and install dependencies:
+   ```bash
+   cd backend
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   pip install coverage
+   ```
+
+2. Run the tests from the **project root** directory (not `backend/`):
+   ```bash
+   cd ..  # back to project root
+   PYTHONPATH=backend python -m unittest Test.test_routes_api Test.test_repos_persistence -v
+   ```
+   On Windows CMD, set the environment variable first:
+   ```cmd
+   set PYTHONPATH=backend
+   python -m unittest Test.test_routes_api Test.test_repos_persistence -v
+   ```
+
+3. Run the tests with code coverage report:
+   ```bash
+   PYTHONPATH=backend coverage run --source=outlookplus_backend.api.routes,outlookplus_backend.persistence.repos -m unittest Test.test_routes_api Test.test_repos_persistence
+   coverage report -m
+   ```
+
+**Test files** are located in `Test/`:
+- `test_routes_api.py` -- unit tests for the REST API route handlers (`routes.py`)
+- `test_repos_persistence.py` -- unit tests for the database repository layer (`repos.py`)
+
+---
+
+### Continuous Integration
+
+Both frontend and backend tests run automatically on every push via GitHub Actions:
+- `.github/workflows/run-frontend-tests.yml`
+- `.github/workflows/run-backend-tests.yml`
+
+---
+
 ## Documentation
 For more detailed setup, data storage mechanisms, and specific configurations:
 - [Backend Documentation](backend/README.md)

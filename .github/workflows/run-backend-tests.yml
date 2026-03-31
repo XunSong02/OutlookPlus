@@ -1,0 +1,36 @@
+name: Backend Tests
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt coverage
+        working-directory: backend
+
+      - name: Run the tests
+        run: python -m unittest Test.test_routes_api Test.test_repos_persistence -v
+        env:
+          PYTHONPATH: backend
+
+      - name: Run coverage
+        run: |
+          coverage run --source=outlookplus_backend.api.routes,outlookplus_backend.persistence.repos -m unittest Test.test_routes_api Test.test_repos_persistence
+          coverage report -m
+        env:
+          PYTHONPATH: backend

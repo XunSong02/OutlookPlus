@@ -3,7 +3,7 @@ import { Email, SuggestedAction } from '../types';
 import { mockEmails } from '../data/mockEmails';
 import { EmailDto, getEmail, listEmails, patchEmailRead } from '../services/outlookplusApi';
 
-function normalizeSuggestedActions(
+export function normalizeSuggestedActions(
   input: unknown,
   email: { sender: { email: string }; subject: string; folder: Email['folder'] }
 ) {
@@ -60,7 +60,7 @@ function normalizeSuggestedActions(
   return trimmed;
 }
 
-function toEmail(dto: EmailDto): Email {
+export function toEmail(dto: EmailDto): Email {
   const sender = {
     name: dto.sender?.name ?? '',
     email: dto.sender?.email ?? '',

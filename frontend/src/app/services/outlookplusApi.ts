@@ -1,6 +1,6 @@
 type HttpMethod = 'GET' | 'POST' | 'PATCH';
 
-function getApiBaseUrl(): string {
+export function getApiBaseUrl(): string {
   const raw =
     (import.meta.env.VITE_API_BASE_URL as string | undefined) ||
     (import.meta.env.VITE_API_URL as string | undefined) ||
@@ -8,12 +8,12 @@ function getApiBaseUrl(): string {
   return raw.replace(/\/+$/, '');
 }
 
-function getAuthToken(): string | undefined {
+export function getAuthToken(): string | undefined {
   const token = import.meta.env.VITE_AUTH_TOKEN as string | undefined;
   return token && token.trim() ? token.trim() : undefined;
 }
 
-async function request<T>(
+export async function request<T>(
   path: string,
   opts: {
     method?: HttpMethod;
