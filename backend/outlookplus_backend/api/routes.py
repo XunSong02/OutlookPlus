@@ -1,3 +1,4 @@
+# OutlookPlus API routes – all REST endpoints for the application.
 from __future__ import annotations
 
 import html
