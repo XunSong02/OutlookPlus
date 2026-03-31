@@ -1,3 +1,4 @@
+/** OutlookPlus API client – handles all frontend-to-backend communication. */
 type HttpMethod = 'GET' | 'POST' | 'PATCH';
 
 export function getApiBaseUrl(): string {
