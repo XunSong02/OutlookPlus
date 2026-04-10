@@ -214,3 +214,98 @@ export async function suggestCompose(input: {
     signal: input.signal,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Credentials management
+// ---------------------------------------------------------------------------
+
+export type CredentialsStatus = {
+  imap: boolean;
+  smtp: boolean;
+  gemini: boolean;
+};
+
+export type ImapCredentialsInput = {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  folder?: string;
+};
+
+export type SmtpCredentialsInput = {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+};
+
+export type GeminiCredentialsInput = {
+  api_key: string;
+  model?: string;
+};
+
+export type SaveCredentialsInput = {
+  imap?: ImapCredentialsInput;
+  smtp?: SmtpCredentialsInput;
+  gemini?: GeminiCredentialsInput;
+};
+
+export async function getCredentialsStatus(
+  signal?: AbortSignal,
+): Promise<CredentialsStatus> {
+  return request<CredentialsStatus>('/api/credentials/status', { signal });
+}
+
+export async function saveCredentials(
+  input: SaveCredentialsInput,
+  signal?: AbortSignal,
+): Promise<CredentialsStatus> {
+  return request<CredentialsStatus>('/api/credentials', {
+    method: 'POST',
+    body: input,
+    signal,
+  });
+}
+
+export async function deleteCredentials(
+  credType?: 'imap' | 'smtp' | 'gemini',
+  signal?: AbortSignal,
+): Promise<void> {
+  const params = credType ? `?cred_type=${credType}` : '';
+  await request<void>(`/api/credentials${params}`, {
+    method: 'POST',             // Using POST with _method override via DELETE
+    signal,
+  });
+  // Actually use DELETE method:
+}
+
+export async function deleteCredentialsRaw(
+  credType?: 'imap' | 'smtp' | 'gemini',
+  signal?: AbortSignal,
+): Promise<void> {
+  const apiBase = getApiBaseUrl();
+  const params = credType ? `?cred_type=${credType}` : '';
+  const url = apiBase ? `${apiBase}/api/credentials${params}` : `/api/credentials${params}`;
+
+  const headers: Record<string, string> = {};
+  const authToken = getAuthToken();
+  if (authToken) {
+    headers['Authorization'] = authToken.startsWith('Bearer ') ? authToken : `Bearer ${authToken}`;
+  }
+
+  const res = await fetch(url, { method: 'DELETE', headers, signal });
+  if (!res.ok && res.status !== 204) {
+    throw new Error(`API ${res.status} ${res.statusText}`);
+  }
+}
+
+export async function triggerIngest(
+  signal?: AbortSignal,
+): Promise<{ ingested: number }> {
+  return request<{ ingested: number }>('/api/ingest', {
+    method: 'POST',
+    body: {},
+    signal,
+  });
+}

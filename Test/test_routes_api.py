@@ -132,6 +132,9 @@ class _FakeSmtp:
     def __init__(self) -> None:
         self.sent: list[tuple[str, list[str], bytes]] = []
 
+    def get_from_addr(self) -> str:
+        return "demo@example.com"
+
     def send(self, *, user_id: str, from_addr: str, to_addrs: list[str], mime_message_bytes: bytes) -> None:
         self.sent.append((from_addr, list(to_addrs), bytes(mime_message_bytes)))
 
@@ -350,19 +353,29 @@ class TestSendEmail(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db = _make_db(tmp)
             user_id = "demo"
-            fake_smtp = _FakeSmtp()
+
+            from outlookplus_backend.credentials import CredentialStore
+            store = CredentialStore(db=db)
 
             with _temp_environ({
                 "OUTLOOKPLUS_SMTP_HOST": "example.com",
                 "OUTLOOKPLUS_SMTP_USERNAME": "demo@example.com",
                 "OUTLOOKPLUS_SMTP_PASSWORD": "pw",
             }):
-                resp = send_email(
-                    body=SendEmailRequest(to="a@b.com", subject="Hi", body="Hello"),
-                    user_id=user_id,
-                    db=db,
-                    smtp=fake_smtp,  # type: ignore[arg-type]
-                )
+                # Monkey-patch get_smtp_for_user so it uses our fake smtp
+                import outlookplus_backend.api.routes as _routes_mod
+                fake_smtp = _FakeSmtp()
+                orig_fn = _routes_mod.get_smtp_for_user
+                _routes_mod.get_smtp_for_user = lambda uid: fake_smtp
+                try:
+                    resp = send_email(
+                        body=SendEmailRequest(to="a@b.com", subject="Hi", body="Hello"),
+                        user_id=user_id,
+                        db=db,
+                        store=store,
+                    )
+                finally:
+                    _routes_mod.get_smtp_for_user = orig_fn
 
             self.assertIsInstance(resp, SendEmailResponse)
             self.assertTrue(resp.id.startswith("sent_"))

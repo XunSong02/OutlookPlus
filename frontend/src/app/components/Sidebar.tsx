@@ -1,13 +1,14 @@
 import React from 'react';
 import { NavLink } from 'react-router';
-import { 
-  Inbox, 
-  Send, 
-  File, 
-  Trash2, 
-  AlertOctagon, 
-  Plus, 
-  BrainCircuit
+import {
+  Inbox,
+  Send,
+  File,
+  Trash2,
+  AlertOctagon,
+  Plus,
+  BrainCircuit,
+  Settings
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -118,6 +119,21 @@ export function Sidebar({ className, onComposeClick }: SidebarProps) {
 
       {/* User Footer */}
       <div className="mt-auto pt-4 pb-2 w-full flex flex-col items-center gap-4 border-t border-gray-200 shrink-0">
+        <NavLink
+          to="/settings"
+          className={({ isActive }) =>
+            clsx(
+              "flex flex-col items-center justify-center w-full py-2 rounded-xl transition-colors group shrink-0",
+              isActive
+                ? "bg-white text-blue-600 shadow-sm"
+                : "text-gray-500 hover:bg-gray-200/50 hover:text-gray-900"
+            )
+          }
+          title="Settings"
+        >
+          <Settings size={20} strokeWidth={2} aria-hidden="true" />
+          <span className="text-[10px] font-medium mt-1">Settings</span>
+        </NavLink>
         <div className="w-10 h-10 rounded-full overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all">
            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150" alt="Current user profile photo" className="w-full h-full object-cover" />
         </div>

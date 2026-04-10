@@ -2,11 +2,16 @@ import React from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
 import { MailLayout } from './components/MailLayout';
 import { EmailDetailWrapper, EmailDetailPlaceholder } from './components/EmailDetailWrapper';
+import { SettingsPage } from './components/SettingsPage';
 
 export const router = createBrowserRouter([
   {
     path: "/",
     element: <Navigate to="/inbox" replace />,
+  },
+  {
+    path: "/settings",
+    element: <SettingsPage />,
   },
   {
     path: "/:folder",

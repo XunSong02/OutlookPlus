@@ -131,6 +131,9 @@ class _FakeSmtp:
     def __init__(self) -> None:
         self.sent: list[tuple[str, list[str], bytes]] = []
 
+    def get_from_addr(self) -> str:
+        return "demo@example.com"
+
     def send(self, *, user_id: str, from_addr: str, to_addrs: list[str], mime_message_bytes: bytes) -> None:
         self.sent.append((from_addr, list(to_addrs), bytes(mime_message_bytes)))
 
@@ -265,6 +268,9 @@ class BackendHappyPathTests(unittest.TestCase):
             user_id = "demo"
             fake_smtp = _FakeSmtp()
 
+            from outlookplus_backend.credentials import CredentialStore
+            store = CredentialStore(db=db)
+
             with _temp_environ(
                 {
                     "OUTLOOKPLUS_SMTP_HOST": "example.com",
@@ -272,12 +278,18 @@ class BackendHappyPathTests(unittest.TestCase):
                     "OUTLOOKPLUS_SMTP_PASSWORD": "pw",
                 }
             ):
-                resp = send_email(
-                    body=SendEmailRequest(to="a@example.com", cc=None, bcc=None, subject="Hi", body="Body"),
-                    user_id=user_id,
-                    db=db,
-                    smtp=fake_smtp,  # type: ignore[arg-type]
-                )
+                import outlookplus_backend.api.routes as _routes_mod
+                orig_fn = _routes_mod.get_smtp_for_user
+                _routes_mod.get_smtp_for_user = lambda uid: fake_smtp
+                try:
+                    resp = send_email(
+                        body=SendEmailRequest(to="a@example.com", cc=None, bcc=None, subject="Hi", body="Body"),
+                        user_id=user_id,
+                        db=db,
+                        store=store,
+                    )
+                finally:
+                    _routes_mod.get_smtp_for_user = orig_fn
 
             self.assertTrue(resp.id.startswith("sent_"))
             self.assertEqual(len(fake_smtp.sent), 1)
@@ -442,9 +454,10 @@ class ApiHttpIntegrationTests(unittest.TestCase):
 
     def test_http_send_email_overrides_smtp(self) -> None:
         # End-to-end send flow: request -> smtp dependency -> persistence.
-        # We override SMTP dependency to avoid real network calls.
+        # We monkey-patch get_smtp_for_user to avoid real network calls.
         from fastapi.testclient import TestClient
         import outlookplus_backend.wiring as wiring
+        import outlookplus_backend.api.routes as routes_mod
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = str(Path(tmp) / "api-test.db")
@@ -458,7 +471,6 @@ class ApiHttpIntegrationTests(unittest.TestCase):
                     "OUTLOOKPLUS_DB_PATH": db_path,
                     "OUTLOOKPLUS_ATTACHMENTS_DIR": attachments_dir,
                     "OUTLOOKPLUS_AUTH_MODE": "A",
-                    # Route handler checks these env vars before calling smtp.
                     "OUTLOOKPLUS_SMTP_HOST": "example.com",
                     "OUTLOOKPLUS_SMTP_USERNAME": "demo@example.com",
                     "OUTLOOKPLUS_SMTP_PASSWORD": "pw",
@@ -468,22 +480,26 @@ class ApiHttpIntegrationTests(unittest.TestCase):
                 Db(db_path=db_path).init_schema()
 
                 app = create_app()
-                app.dependency_overrides[wiring.get_smtp_client] = lambda: fake_smtp
+                # Monkey-patch the function that send_email calls internally.
+                orig_fn = routes_mod.get_smtp_for_user
+                routes_mod.get_smtp_for_user = lambda uid: fake_smtp
+                try:
+                    client = TestClient(app)
+                    resp = client.post(
+                        "/api/send-email",
+                        json={"to": "a@example.com", "subject": "Hi", "body": "Body"},
+                    )
+                    self.assertEqual(resp.status_code, 200)
+                    payload: dict[str, Any] = resp.json()
+                    self.assertTrue(str(payload["id"]).startswith("sent_"))
+                    self.assertEqual(len(fake_smtp.sent), 1)
 
-                client = TestClient(app)
-                resp = client.post(
-                    "/api/send-email",
-                    json={"to": "a@example.com", "subject": "Hi", "body": "Body"},
-                )
-                self.assertEqual(resp.status_code, 200)
-                payload: dict[str, Any] = resp.json()
-                self.assertTrue(str(payload["id"]).startswith("sent_"))
-                self.assertEqual(len(fake_smtp.sent), 1)
-
-                # Sent item persisted.
-                with Db(db_path=db_path).connect() as conn:
-                    n = int(conn.execute("SELECT COUNT(1) AS n FROM emails WHERE folder='sent'").fetchone()["n"])
-                self.assertEqual(n, 1)
+                    # Sent item persisted.
+                    with Db(db_path=db_path).connect() as conn:
+                        n = int(conn.execute("SELECT COUNT(1) AS n FROM emails WHERE folder='sent'").fetchone()["n"])
+                    self.assertEqual(n, 1)
+                finally:
+                    routes_mod.get_smtp_for_user = orig_fn
 
 
 if __name__ == "__main__":
