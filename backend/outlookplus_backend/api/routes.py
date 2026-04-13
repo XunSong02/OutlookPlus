@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import re
 import time
 from email.message import EmailMessage
 from email.utils import getaddresses, parseaddr
@@ -73,13 +74,33 @@ def _sender_from_from_addr(from_addr: str | None) -> EmailSenderDto:
     return EmailSenderDto(name=name, email=email_addr, avatar=None)
 
 
+_URL_RE = re.compile(r'https?://[^\s<>]+')
+_ANGLE_URL_RE = re.compile(r'<(https?://[^\s<>]+)>')
+
+
 def _body_to_html(body_text: str | None) -> str:
     text = (body_text or "").strip()
     if not text:
         return ""
-    escaped = html.escape(text)
-    escaped = escaped.replace("\n\n", "</p><p>").replace("\n", "<br/>")
-    return f"<p>{escaped}</p>"
+    # First, remove angle-bracket wrappers: <https://...> → https://...
+    text = _ANGLE_URL_RE.sub(r'\1', text)
+    # Split text into URL and non-URL segments, escape only non-URL parts
+    parts: list[str] = []
+    last_end = 0
+    for m in _URL_RE.finditer(text):
+        # Escape text before this URL
+        if m.start() > last_end:
+            parts.append(html.escape(text[last_end:m.start()]))
+        url = m.group(0)
+        display = html.escape(url)
+        parts.append(f'<a href="{html.escape(url)}" target="_blank" rel="noopener">{display}</a>')
+        last_end = m.end()
+    # Escape remaining text after last URL
+    if last_end < len(text):
+        parts.append(html.escape(text[last_end:]))
+    result = "".join(parts)
+    result = result.replace("\n\n", "</p><p>").replace("\n", "<br/>")
+    return f"<p>{result}</p>"
 
 
 def _parse_recipients(value: str | None) -> list[str]:

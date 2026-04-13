@@ -48,7 +48,7 @@ class GeminiClient:
         if not api_key:
             raise GeminiError("GEMINI_API_KEY not set")
 
-        model = os.getenv("OUTLOOKPLUS_GEMINI_MODEL", "gemini-1.5-flash")
+        model = os.getenv("OUTLOOKPLUS_GEMINI_MODEL", "gemini-3-flash-preview")
         return api_key, model
 
     def generate_json(self, *, prompt: str) -> GeminiResponse:

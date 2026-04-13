@@ -194,7 +194,7 @@ class SmtpCredentialsDto(BaseModel):
 
 class GeminiCredentialsDto(BaseModel):
     api_key: str
-    model: str = "gemini-1.5-flash"
+    model: str = "gemini-3-flash-preview"
 
 
 class SaveCredentialsRequest(BaseModel):

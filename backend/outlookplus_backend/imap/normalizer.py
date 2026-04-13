@@ -57,6 +57,35 @@ def _extract_body_text(msg: Message) -> Optional[str]:
     return None
 
 
+def _extract_body_html(msg: Message) -> Optional[str]:
+    """Extract the first text/html part that isn't an attachment."""
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.is_multipart():
+                continue
+            ctype = part.get_content_type()
+            disp = (part.get("Content-Disposition") or "").lower()
+            if "attachment" in disp:
+                continue
+            if ctype == "text/html":
+                try:
+                    payload = part.get_payload(decode=True) or b""
+                    charset = part.get_content_charset() or "utf-8"
+                    return payload.decode(charset, errors="replace")
+                except Exception:
+                    continue
+        return None
+
+    if msg.get_content_type() == "text/html":
+        try:
+            payload = msg.get_payload(decode=True) or b""
+            charset = msg.get_content_charset() or "utf-8"
+            return payload.decode(charset, errors="replace")
+        except Exception:
+            return None
+    return None
+
+
 def _extract_calendar_attachments(msg: Message) -> list[tuple[ParsedAttachment, bytes]]:
     out: list[tuple[ParsedAttachment, bytes]] = []
     if not msg.is_multipart():
@@ -105,6 +134,7 @@ def normalize_rfc822(rfc822_bytes: bytes) -> NormalizedMailboxMessage:
         sent_at_utc=sent_at_utc,
         received_at_utc=received_at_utc,
         body_text=_extract_body_text(msg),
+        body_html=_extract_body_html(msg),
     )
 
     return NormalizedMailboxMessage(email=email, attachments=_extract_calendar_attachments(msg))

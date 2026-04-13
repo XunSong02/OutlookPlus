@@ -9,11 +9,13 @@ import {
   type CredentialsStatus,
   type SaveCredentialsInput,
 } from '../services/outlookplusApi';
+import { useEmails } from '../state/emails';
 
 type SectionStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export function SettingsPage() {
   const navigate = useNavigate();
+  const { reload } = useEmails();
 
   // Credential status from backend
   const [status, setStatus] = useState<CredentialsStatus | null>(null);
@@ -36,7 +38,7 @@ export function SettingsPage() {
 
   // Gemini fields
   const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [geminiModel, setGeminiModel] = useState('gemini-1.5-flash');
+  const [geminiModel, setGeminiModel] = useState('gemini-3-flash-preview');
   const [geminiStatus, setGeminiStatus] = useState<SectionStatus>('idle');
 
   // Ingest
@@ -120,6 +122,7 @@ export function SettingsPage() {
     try {
       const result = await triggerIngest();
       setIngestResult(`Fetched ${result.ingested} new email(s)`);
+      if (result.ingested > 0) await reload();
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -253,7 +256,7 @@ export function SettingsPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Model</label>
-              <input type="text" value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} placeholder="gemini-1.5-flash" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              <input type="text" value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} placeholder="gemini-3-flash-preview" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
             </div>
             <SaveButton onClick={handleSaveGemini} status={geminiStatus} label="Save Gemini" />
           </div>

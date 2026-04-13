@@ -20,6 +20,7 @@ class ParsedEmail:
     sent_at_utc: Optional[UtcTimestamp]
     received_at_utc: UtcTimestamp
     body_text: Optional[str]
+    body_html: Optional[str] = None
 
 
 @dataclass(frozen=True)

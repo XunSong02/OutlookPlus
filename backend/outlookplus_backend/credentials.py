@@ -39,7 +39,7 @@ class SmtpCredentials:
 @dataclass(frozen=True)
 class GeminiCredentials:
     api_key: str
-    model: str = "gemini-1.5-flash"
+    model: str = "gemini-3-flash-preview"
 
 
 # ---------------------------------------------------------------------------
@@ -165,14 +165,14 @@ class CredentialStore:
         if raw:
             return GeminiCredentials(
                 api_key=raw["api_key"],
-                model=raw.get("model", "gemini-1.5-flash"),
+                model=raw.get("model", "gemini-3-flash-preview"),
             )
         # Fallback to env
         api_key = (os.getenv("GEMINI_API_KEY") or "").strip() or (os.getenv("OUTLOOKPLUS_GEMINI_API_KEY") or "").strip()
         if api_key:
             return GeminiCredentials(
                 api_key=api_key,
-                model=os.getenv("OUTLOOKPLUS_GEMINI_MODEL", "gemini-1.5-flash"),
+                model=os.getenv("OUTLOOKPLUS_GEMINI_MODEL", "gemini-3-flash-preview"),
             )
         return None
 

@@ -61,7 +61,7 @@ class IngestionWorker:
                     is_read=False,
                     labels=[],
                     preview_text=preview,
-                    body_html=None,
+                    body_html=normalized.email.body_html,
                 )
 
                 # Skip attachments if we already have any for this email (idempotency for at-least-once ingestion).
