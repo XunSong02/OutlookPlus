@@ -96,6 +96,9 @@ export function EmailDetail({ email }: EmailDetailProps) {
         }
   };
 
+  // Single source of truth: show spinner while loading OR if AI returned empty.
+  const aiPending = aiLoading || (!aiAnalysis.summary && aiAnalysis.suggestedActions.length === 0);
+
   return (
     <div className="h-full flex flex-col bg-white">
             <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
@@ -106,7 +109,7 @@ export function EmailDetail({ email }: EmailDetailProps) {
             <div className="flex justify-between items-start mb-6">
                 <h1 className="text-2xl font-bold text-gray-900 leading-tight">{email.subject}</h1>
                 <div className="flex items-center gap-2">
-                    {aiLoading ? (
+                    {aiPending ? (
                       <span className="text-sm text-gray-400 bg-gray-100 px-2 py-1 rounded-md animate-pulse">...</span>
                     ) : (
                       <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-md">
@@ -160,14 +163,14 @@ export function EmailDetail({ email }: EmailDetailProps) {
         <aside className="w-full lg:w-80 border-t lg:border-t-0 lg:border-l border-gray-200 bg-gray-50 overflow-y-auto flex flex-col shadow-[inset_4px_0_12px_-4px_rgba(0,0,0,0.05)]" aria-label="AI assistant">
             <div className="p-6 sticky top-0 bg-gray-50/95 backdrop-blur z-10 border-b border-gray-200">
                 <div className="flex items-center gap-2 text-indigo-600 font-semibold mb-1">
-                    {aiLoading ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Sparkles size={18} aria-hidden="true" />}
+                    {aiPending ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Sparkles size={18} aria-hidden="true" />}
                     <span>AI Assistant</span>
                 </div>
-                <p className="text-xs text-gray-500">{aiLoading ? 'Analyzing email...' : 'Powered by Agent v2.0'}</p>
+                <p className="text-xs text-gray-500">{aiPending ? 'Analyzing email...' : 'Powered by Agent v2.0'}</p>
             </div>
             
             <div className="p-6 space-y-8">
-                {aiLoading || (!aiAnalysis.summary && aiAnalysis.suggestedActions.length === 0) ? (
+                {aiPending ? (
                 <div className="flex flex-col items-center justify-center py-12 text-gray-400 space-y-3">
                     <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
                     <span className="text-sm font-medium">AI is analyzing this email...</span>

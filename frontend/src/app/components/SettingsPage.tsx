@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, CheckCircle2, XCircle, Loader2, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import {
@@ -18,6 +18,17 @@ type SectionStatus = 'idle' | 'saving' | 'saved' | 'error';
 export function SettingsPage() {
   const navigate = useNavigate();
   const { reload, setIsFetching } = useEmails();
+
+  // Navigate to inbox AFTER React has committed the setEmails() state
+  // update. useEffect runs post-render, so the context value is guaranteed
+  // to be current when MailLayout/EmailList mount.
+  const [pendingNavigate, setPendingNavigate] = useState(false);
+  useEffect(() => {
+    if (pendingNavigate) {
+      setPendingNavigate(false);
+      navigate('/inbox');
+    }
+  }, [pendingNavigate, navigate]);
 
   // Credential status from backend
   const [status, setStatus] = useState<CredentialsStatus | null>(null);
@@ -133,11 +144,11 @@ export function SettingsPage() {
     setIngestResult(null);
     setError(null);
     try {
-      const result = await triggerIngest();
+      await triggerIngest();
       await reload();
-      // Defer navigation to the next tick so React commits the
-      // setEmails() state update before the route change.
-      setTimeout(() => navigate('/inbox'), 50);
+      // Set flag — the useEffect above navigates AFTER React renders
+      // the updated emails into context.
+      setPendingNavigate(true);
     } catch (e: any) {
       // Extract readable detail from API error JSON if possible.
       let msg = e.message ?? 'Fetch failed';

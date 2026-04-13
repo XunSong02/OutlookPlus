@@ -379,8 +379,9 @@ class WorkerIngestionHappyPathTests(unittest.TestCase):
                 att_count = int(conn.execute("SELECT COUNT(1) AS n FROM attachments").fetchone()["n"])
                 self.assertEqual(att_count, 1)
 
+                # AI classification is deferred to email-open time, not during ingest.
                 analysis_count = int(conn.execute("SELECT COUNT(1) AS n FROM email_ai_analysis").fetchone()["n"])
-                self.assertEqual(analysis_count, 1)
+                self.assertEqual(analysis_count, 0)
 
                 state = conn.execute("SELECT imap_uidvalidity, last_seen_uid FROM ingestion_state WHERE user_id=?", (user_id,)).fetchone()
                 self.assertIsNotNone(state)

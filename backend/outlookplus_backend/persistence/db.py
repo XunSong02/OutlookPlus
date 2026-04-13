@@ -123,8 +123,9 @@ class DbManager:
     The *active_email* is set per-request by a middleware.
     """
 
-    def __init__(self, base_dir: str) -> None:
+    def __init__(self, base_dir: str, default_db_path: str | None = None) -> None:
         self._base_dir = base_dir
+        self._default_db_path = default_db_path or os.path.join(base_dir, "outlookplus.db")
         self._dbs: dict[str, Db] = {}
         self._active_email: str | None = None
 
@@ -147,7 +148,7 @@ class DbManager:
                 db_path = os.path.join(self._base_dir, safe, "outlookplus.db")
                 s3_key = f"users/{safe}/outlookplus.db"
             else:
-                db_path = os.path.join(self._base_dir, "outlookplus.db")
+                db_path = self._default_db_path
                 s3_key = "outlookplus.db"
             db = Db(db_path=db_path, s3_key=s3_key)
             db.init_schema()

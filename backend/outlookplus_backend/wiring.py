@@ -21,7 +21,7 @@ def get_db() -> DbManager:
     cfg = load_storage_config()
     import os
     base_dir = os.path.dirname(cfg.db_path) or "data"
-    return DbManager(base_dir=base_dir)
+    return DbManager(base_dir=base_dir, default_db_path=cfg.db_path)
 
 
 def init_storage() -> None:
