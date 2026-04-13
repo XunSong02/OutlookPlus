@@ -1,5 +1,19 @@
 name: Backend Tests
-on: push
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "Test/**"
+      - ".github/workflows/run-backend-tests.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "Test/**"
+      - ".github/workflows/run-backend-tests.yml"
+
+concurrency:
+  group: backend-tests-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -20,17 +34,20 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install Dependencies
-        run: pip install -r requirements.txt coverage
+        run: pip install -r requirements.txt -r requirements-dev.txt coverage
         working-directory: backend
 
       - name: Run the tests
-        run: python -m unittest Test.test_routes_api Test.test_repos_persistence -v
+        run: |
+          python -m unittest discover -s Test -p "test*.py" -v
+          python -m unittest discover -s backend/tests -p "test*.py" -v
         env:
           PYTHONPATH: backend
 
       - name: Run coverage
         run: |
-          coverage run --source=outlookplus_backend.api.routes,outlookplus_backend.persistence.repos -m unittest Test.test_routes_api Test.test_repos_persistence
-          coverage report -m
+          coverage run --source=outlookplus_backend -m unittest discover -s Test -p "test*.py"
+          coverage run --append --source=outlookplus_backend -m unittest discover -s backend/tests -p "test*.py"
+          coverage report -m --fail-under=70
         env:
           PYTHONPATH: backend
