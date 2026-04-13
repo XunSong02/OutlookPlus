@@ -298,7 +298,7 @@ class TestGetEmailRoute(unittest.TestCase):
 
             result = get_email_route(
                 email_id="msg-1", user_id=user_id, db=db,
-                analysis_service=analysis_svc, analysis_classifier=None,
+                analysis_service=analysis_svc,
             )
             expected = get_email(
                 email_id="msg-1", user_id=user_id, db=db,
