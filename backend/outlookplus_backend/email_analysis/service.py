@@ -135,10 +135,7 @@ def _normalize_actions(*, email: EmailMessage, persisted: list[object]) -> list[
     folder = (email.folder or "").lower()
     out: list[dict[str, object]] = []
 
-    if folder == "inbox" or not folder:
-        out.append(_make_reply_draft(email))
-
-    # Prefer structured persisted actions (if present), then persisted strings.
+    # Prefer Gemini-generated actions first.
     for item in persisted_items:
         if len(out) >= 3:
             break
@@ -155,13 +152,16 @@ def _normalize_actions(*, email: EmailMessage, persisted: list[object]) -> list[
             break
         out.append({"kind": "suggestion", "text": t})
 
-    # Fill deterministically.
+    # If inbox and Gemini didn't provide a reply_draft, add the generic one.
+    if (folder == "inbox" or not folder) and not _has_reply_draft(out) and len(out) < 3:
+        out.insert(0, _make_reply_draft(email))
+
+    # Fill remaining slots with fallback suggestions.
     for a in _fallback_suggestions(email):
         if len(out) >= 3:
             break
         if str(a.get("kind") or "") == "reply_draft" and _has_reply_draft(out):
             continue
-        # Avoid duplicate suggestion texts.
         if a.get("kind") == "suggestion":
             t = str(a.get("text") or "").strip()
             if any(str(x.get("text") or "").strip().lower() == t.lower() for x in out if isinstance(x, dict)):
