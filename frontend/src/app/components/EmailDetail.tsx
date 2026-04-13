@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { format } from 'date-fns';
-import { 
-  Sparkles, 
-  Bot, 
+import {
+  Sparkles,
+  Bot,
   Send,
   ChevronRight,
   Reply,
@@ -13,6 +13,24 @@ import { Email } from '../types';
 import { toast } from 'sonner';
 import { runAiRequest } from '../services/outlookplusApi';
 import { useCompose } from '../state/compose';
+
+/** Turn plain-text URLs in a string into clickable <a> tags. */
+function linkify(text: string): React.ReactNode[] {
+  const URL_RE = /https?:\/\/[^\s<>]+/g;
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = URL_RE.exec(text)) !== null) {
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    const url = match[0];
+    parts.push(
+      <a key={match.index} href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{url}</a>
+    );
+    last = match.index + url.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
 
 interface EmailDetailProps {
   email: Email;
@@ -113,7 +131,7 @@ export function EmailDetail({ email }: EmailDetailProps) {
                 <div>
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Summary</h3>
                     <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 text-sm text-gray-700 leading-relaxed">
-                        {email.aiAnalysis.summary}
+                        {linkify(email.aiAnalysis.summary)}
                     </div>
                 </div>
 
@@ -210,7 +228,7 @@ export function EmailDetail({ email }: EmailDetailProps) {
                                 <Bot size={14} aria-hidden="true" />
                                 <span>Agent</span>
                              </div>
-                             {aiResponse}
+                             {linkify(aiResponse)}
                         </div>
                     )}
                 </div>

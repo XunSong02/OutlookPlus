@@ -76,11 +76,9 @@ export function Sidebar({ className, onComposeClick }: SidebarProps) {
               <item.icon size={22} strokeWidth={2} aria-hidden="true" />
               {(() => {
                 const unreadCount = getUnreadCount(item.folder);
+                if (unreadCount === 0) return null;
                 return (
-                <span className={clsx(
-                  "absolute -top-2 -right-2.5 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center border-2 border-gray-50 group-hover:border-gray-100 z-10",
-                  unreadCount > 0 ? "bg-red-500" : "bg-gray-400"
-                )}>
+                <span className="absolute -top-2 -right-2.5 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center border-2 border-gray-50 group-hover:border-gray-100 z-10">
                   {unreadCount}
                 </span>
                 );
