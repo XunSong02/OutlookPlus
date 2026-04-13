@@ -102,7 +102,7 @@ class PromptBuilder:
             "- Each item's text must be brief (1-2 sentences)\n"
             "- If folder is 'inbox', include EXACTLY 1 item with kind='reply_draft' and include draft.to, draft.subject, draft.body\n"
             "- If folder is NOT 'inbox', ALL 3 items must have kind='suggestion' (no draft)\n"
-            "- Do not include markdown or code fences\n\n"
+            "- Do not include markdown or code fences, EXCEPT use [text](url) for hyperlinks in summary\n\n"
             "Email:\n"
             f"folder: {folder_norm!r}\n"
             f"subject: {subject!r}\n"

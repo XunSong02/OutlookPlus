@@ -14,19 +14,28 @@ import { toast } from 'sonner';
 import { runAiRequest } from '../services/outlookplusApi';
 import { useCompose } from '../state/compose';
 
-/** Turn plain-text URLs in a string into clickable <a> tags. */
+/** Turn markdown links [text](url) and bare URLs into clickable <a> tags. */
 function linkify(text: string): React.ReactNode[] {
-  const URL_RE = /https?:\/\/[^\s<>]+/g;
+  // Match markdown links first, then bare URLs
+  const LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>)]+/g;
   const parts: React.ReactNode[] = [];
   let last = 0;
   let match: RegExpExecArray | null;
-  while ((match = URL_RE.exec(text)) !== null) {
+  while ((match = LINK_RE.exec(text)) !== null) {
     if (match.index > last) parts.push(text.slice(last, match.index));
-    const url = match[0];
-    parts.push(
-      <a key={match.index} href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{url}</a>
-    );
-    last = match.index + url.length;
+    if (match[1] && match[2]) {
+      // Markdown link: [text](url)
+      parts.push(
+        <a key={match.index} href={match[2]} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{match[1]}</a>
+      );
+    } else {
+      // Bare URL
+      const url = match[0];
+      parts.push(
+        <a key={match.index} href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{url}</a>
+      );
+    }
+    last = match.index + match[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));
   return parts;
