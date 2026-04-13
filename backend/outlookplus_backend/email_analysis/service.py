@@ -170,8 +170,8 @@ class EmailAnalysisService:
 
     def _fallback(self, *, email: EmailMessage) -> dict[str, object]:
         return {
-            "category": "",
-            "sentiment": "",
+            "category": "Work",
+            "sentiment": "neutral",
             "summary": "",
             "suggestedActions": [],
         }
