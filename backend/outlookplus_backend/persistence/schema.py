@@ -150,6 +150,14 @@ CREATE TABLE IF NOT EXISTS ingestion_state (
     updated_at_utc   TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS user_credentials (
+    user_id      TEXT NOT NULL,
+    cred_type    TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    PRIMARY KEY (user_id, cred_type)
+);
+
 """
 
 
