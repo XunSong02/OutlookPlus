@@ -132,6 +132,16 @@ def get_email_analysis_classifier() -> EmailAnalysisClassifier:
     )
 
 
+def get_email_analysis_classifier_for_user(user_id: str) -> EmailAnalysisClassifier:
+    """Return an EmailAnalysisClassifier wired with the user's Gemini key."""
+    return EmailAnalysisClassifier(
+        db=get_db(),
+        prompt_builder=_prompt_builder(),
+        gemini=get_gemini_for_user(user_id),
+        validator=_validator(),
+    )
+
+
 @lru_cache(maxsize=1)
 def get_ai_assistant_service() -> AiAssistantService:
     return AiAssistantService(

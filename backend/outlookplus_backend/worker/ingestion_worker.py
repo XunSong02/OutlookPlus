@@ -84,8 +84,9 @@ class IngestionWorker:
                         att_repo.add_attachment(user_id=user_id, email_id=email_id, meta=meta, storage_path=path)
 
             ingested += 1
-            self.meeting_classifier.classify_if_needed(user_id=user_id, email_id=email_id)
-            self.email_analysis_classifier.classify_if_needed(user_id=user_id, email_id=email_id)
+            # AI classification is deferred to when the user opens an email
+            # (get_email_route) to keep ingest fast and within API Gateway's
+            # 29-second timeout.
 
         with self.db.connect() as conn:
             IngestionStateRepositorySqlite(conn).set_state(user_id=user_id, uidvalidity=uidvalidity, last_seen_uid=max_uid)

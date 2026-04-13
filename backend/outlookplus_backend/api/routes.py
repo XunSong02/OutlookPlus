@@ -46,6 +46,7 @@ from outlookplus_backend.wiring import (
     get_email_action_service,
     get_email_analysis_service,
     get_email_analysis_classifier,
+    get_email_analysis_classifier_for_user,
     get_meeting_service,
     get_reply_need_service,
     get_smtp_client,
@@ -295,14 +296,15 @@ def get_email_route(
     user_id: str = Depends(require_user_id),
     db: Db = Depends(get_db),
     analysis_service=Depends(get_email_analysis_service),
-    analysis_classifier=Depends(get_email_analysis_classifier),
 ) -> EmailDto:
+    # Use the user's stored Gemini credentials for lazy AI analysis.
+    classifier = get_email_analysis_classifier_for_user(user_id)
     return get_email(
         email_id=email_id,
         user_id=user_id,
         db=db,
         analysis_service=analysis_service,
-        analysis_classifier=analysis_classifier,
+        analysis_classifier=classifier,
     )
 
 
