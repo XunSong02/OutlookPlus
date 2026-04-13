@@ -57,45 +57,6 @@ def _dedupe_text(items: list[str]) -> list[str]:
     return out
 
 
-def _make_reply_draft(email: EmailMessage) -> dict[str, object]:
-    name = _safe_sender_name(email.from_addr)
-    to_addr = _safe_sender_email(email.from_addr)
-    subj = _reply_subject(email.subject)
-    brief = f"Hi {name}, thanks for your email. I’ll review and get back to you soon."
-    body = f"Hi {name},\n\nThanks for your email. I’ll review and get back to you soon.\n\nBest,"
-    return {
-        "kind": "reply_draft",
-        "text": brief,
-        "draft": {"to": to_addr, "subject": subj, "body": body},
-    }
-
-
-def _fallback_suggestions(email: EmailMessage) -> list[dict[str, object]]:
-    folder = (email.folder or "").lower()
-
-    if folder == "drafts":
-        texts = [
-            "Finish the draft and send when ready.",
-            "Ignore for now if waiting on inputs.",
-            "Discard the draft if no longer needed.",
-        ]
-        return [{"kind": "suggestion", "text": t} for t in texts]
-
-    if folder in {"sent", "trash", "spam"}:
-        texts = [
-            "Ignore if no further action is required.",
-            "Check what happened and confirm details.",
-            "Archive for reference.",
-        ]
-        return [{"kind": "suggestion", "text": t} for t in texts]
-
-    # inbox + anything else
-    return [
-        _make_reply_draft(email),
-        {"kind": "suggestion", "text": "Ignore if no action is required."},
-        {"kind": "suggestion", "text": "Check what happened and confirm details."},
-    ]
-
 
 def _has_reply_draft(actions: list[dict[str, object]]) -> bool:
     for a in actions:

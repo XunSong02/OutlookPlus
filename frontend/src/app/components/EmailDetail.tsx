@@ -59,15 +59,14 @@ export function EmailDetail({ email }: EmailDetailProps) {
     // Trigger AI analysis asynchronously after the email renders.
     useEffect(() => {
       setAiLoading(true);
-      setAiAnalysis(email.aiAnalysis);
       setAiResponse(null);
       const controller = new AbortController();
       analyzeEmail({ emailId: email.id, signal: controller.signal })
         .then((result) => {
           setAiAnalysis({
-            category: (result.category as Email['aiAnalysis']['category']) ?? email.aiAnalysis.category,
-            sentiment: (result.sentiment as Email['aiAnalysis']['sentiment']) ?? aiAnalysis.sentiment,
-            summary: (result.summary as string) ?? aiAnalysis.summary,
+            category: (result.category as Email['aiAnalysis']['category']) || 'Work',
+            sentiment: (result.sentiment as Email['aiAnalysis']['sentiment']) || 'neutral',
+            summary: String(result.summary ?? ''),
             suggestedActions: normalizeSuggestedActions(result.suggestedActions, {
               sender: email.sender,
               subject: email.subject,
@@ -75,7 +74,7 @@ export function EmailDetail({ email }: EmailDetailProps) {
             }),
           });
         })
-        .catch(() => { /* keep fallback */ })
+        .catch(() => { /* keep initial state */ })
         .finally(() => setAiLoading(false));
       return () => controller.abort();
     }, [email.id]);

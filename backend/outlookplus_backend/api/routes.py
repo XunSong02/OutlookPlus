@@ -220,23 +220,7 @@ def list_emails(
             "category": "Work",
             "sentiment": "neutral",
             "summary": "",
-            "suggestedActions": [
-                {
-                    "kind": "suggestion",
-                    "text": "Ignore if no action is required.",
-                    "draft": None,
-                },
-                {
-                    "kind": "suggestion",
-                    "text": "Check what happened and confirm details.",
-                    "draft": None,
-                },
-                {
-                    "kind": "suggestion",
-                    "text": "Archive for reference.",
-                    "draft": None,
-                },
-            ],
+            "suggestedActions": [],
         }
         items.append(
             EmailDto(
