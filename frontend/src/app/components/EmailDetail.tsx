@@ -164,6 +164,12 @@ export function EmailDetail({ email }: EmailDetailProps) {
             </div>
             
             <div className="p-6 space-y-8">
+                {aiLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 text-gray-400 space-y-3">
+                    <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
+                    <span className="text-sm font-medium">AI is analyzing this email...</span>
+                </div>
+                ) : (<>
                 {/* Summary Section */}
                 <div>
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Summary</h3>
@@ -230,6 +236,7 @@ export function EmailDetail({ email }: EmailDetailProps) {
                                                 })}
                     </div>
                 </div>
+                </>)}
 
                 {/* Custom Action */}
                 <div>
