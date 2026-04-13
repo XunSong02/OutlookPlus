@@ -9,17 +9,19 @@ from outlookplus_backend.llm import GeminiClient, PromptBuilder, RateLimiter, Re
 from outlookplus_backend.email_actions import EmailActionService
 from outlookplus_backend.email_analysis import EmailAnalysisClassifier, EmailAnalysisService
 from outlookplus_backend.meeting import MeetingClassifier, MeetingService
-from outlookplus_backend.persistence.db import Db
+from outlookplus_backend.persistence.db import Db, DbManager
 from outlookplus_backend.ai_assistant import AiAssistantService
 from outlookplus_backend.reply_need import ReplyNeedService
 from outlookplus_backend.smtp import SmtpClient
 
 
 @lru_cache(maxsize=1)
-def get_db() -> Db:
+def get_db() -> DbManager:
+    """Return the global DbManager (per-email routing)."""
     cfg = load_storage_config()
-    db = Db(db_path=cfg.db_path)
-    return db
+    import os
+    base_dir = os.path.dirname(cfg.db_path) or "data"
+    return DbManager(base_dir=base_dir)
 
 
 def init_storage() -> None:

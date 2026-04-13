@@ -14,6 +14,34 @@ export function getAuthToken(): string | undefined {
   return token && token.trim() ? token.trim() : undefined;
 }
 
+// ---------------------------------------------------------------------------
+// Per-email-account routing
+// ---------------------------------------------------------------------------
+
+const USER_EMAIL_KEY = 'outlookplus_user_email';
+
+/** Get the active user email (IMAP username) stored in localStorage. */
+export function getUserEmail(): string | undefined {
+  try {
+    return localStorage.getItem(USER_EMAIL_KEY) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Set (or clear) the active user email in localStorage. */
+export function setUserEmail(email: string | undefined): void {
+  try {
+    if (email) {
+      localStorage.setItem(USER_EMAIL_KEY, email);
+    } else {
+      localStorage.removeItem(USER_EMAIL_KEY);
+    }
+  } catch {
+    // localStorage unavailable (e.g. SSR or private browsing)
+  }
+}
+
 export async function request<T>(
   path: string,
   opts: {
@@ -33,6 +61,11 @@ export async function request<T>(
   const authToken = getAuthToken();
   if (authToken) {
     headers['Authorization'] = authToken.startsWith('Bearer ') ? authToken : `Bearer ${authToken}`;
+  }
+
+  const userEmail = getUserEmail();
+  if (userEmail) {
+    headers['X-User-Email'] = userEmail;
   }
 
   let body: BodyInit | undefined;
@@ -293,6 +326,8 @@ export async function deleteCredentialsRaw(
   if (authToken) {
     headers['Authorization'] = authToken.startsWith('Bearer ') ? authToken : `Bearer ${authToken}`;
   }
+  const ue = getUserEmail();
+  if (ue) headers['X-User-Email'] = ue;
 
   const res = await fetch(url, { method: 'DELETE', headers, signal });
   if (!res.ok && res.status !== 204) {

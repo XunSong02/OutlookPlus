@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,23 +27,19 @@ def _s3_bucket() -> str | None:
     return os.environ.get("OUTLOOKPLUS_S3_BUCKET")
 
 
-def _s3_key(db_path: str) -> str:
-    return "outlookplus.db"
-
-
-def _download_from_s3(db_path: str) -> None:
+def _download_from_s3(db_path: str, s3_key: str) -> None:
     """Download DB from S3 to local path if it exists."""
     bucket = _s3_bucket()
     if not bucket:
         return
     Path(os.path.dirname(db_path) or ".").mkdir(parents=True, exist_ok=True)
     try:
-        _get_s3().download_file(bucket, _s3_key(db_path), db_path)
+        _get_s3().download_file(bucket, s3_key, db_path)
     except _get_s3().exceptions.ClientError:
         pass  # First run – no DB in S3 yet, that's fine.
 
 
-def _upload_to_s3(db_path: str) -> None:
+def _upload_to_s3(db_path: str, s3_key: str) -> None:
     """Checkpoint WAL then upload local DB to S3."""
     bucket = _s3_bucket()
     if not bucket:
@@ -55,7 +52,12 @@ def _upload_to_s3(db_path: str) -> None:
             conn.close()
         except Exception:
             pass
-        _get_s3().upload_file(db_path, bucket, _s3_key(db_path))
+        _get_s3().upload_file(db_path, bucket, s3_key)
+
+
+def _sanitize_email(email: str) -> str:
+    """Make an email address safe for use as a directory / S3 key component."""
+    return re.sub(r"[^a-zA-Z0-9@._-]", "_", email.lower().strip())
 
 
 class _ClosingConnection(sqlite3.Connection):
@@ -79,12 +81,13 @@ class _ClosingConnection(sqlite3.Connection):
 @dataclass(frozen=True)
 class Db:
     db_path: str
+    s3_key: str = "outlookplus.db"
     _restored: bool = False
 
     def _ensure_restored(self) -> None:
         """On first access, pull the DB from S3 (cold-start)."""
         if not object.__getattribute__(self, "_restored"):
-            _download_from_s3(self.db_path)
+            _download_from_s3(self.db_path, self.s3_key)
             object.__setattr__(self, "_restored", True)
 
     def connect(self) -> sqlite3.Connection:
@@ -104,9 +107,64 @@ class Db:
 
     def save_to_s3(self) -> None:
         """Persist current DB to S3."""
-        _upload_to_s3(self.db_path)
+        _upload_to_s3(self.db_path, self.s3_key)
 
     def init_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA_SQL)
             apply_migrations(conn)
+
+
+class DbManager:
+    """Proxy that dispatches to per-email Db instances.
+
+    Exposes the same interface as ``Db`` (connect / save_to_s3 / init_schema /
+    db_path) so all existing code that depends on ``Db`` works unchanged.
+    The *active_email* is set per-request by a middleware.
+    """
+
+    def __init__(self, base_dir: str) -> None:
+        self._base_dir = base_dir
+        self._dbs: dict[str, Db] = {}
+        self._active_email: str | None = None
+
+    # -- email routing -------------------------------------------------------
+
+    @property
+    def active_email(self) -> str | None:
+        return self._active_email
+
+    def set_active_email(self, email: str | None) -> None:
+        self._active_email = email
+        # Eagerly initialise the DB for this email (schema + S3 restore).
+        self._get_active_db()
+
+    def _get_active_db(self) -> Db:
+        key = self._active_email or "__default__"
+        if key not in self._dbs:
+            if self._active_email:
+                safe = _sanitize_email(self._active_email)
+                db_path = os.path.join(self._base_dir, safe, "outlookplus.db")
+                s3_key = f"users/{safe}/outlookplus.db"
+            else:
+                db_path = os.path.join(self._base_dir, "outlookplus.db")
+                s3_key = "outlookplus.db"
+            db = Db(db_path=db_path, s3_key=s3_key)
+            db.init_schema()
+            self._dbs[key] = db
+        return self._dbs[key]
+
+    # -- Db-compatible interface ---------------------------------------------
+
+    def connect(self) -> sqlite3.Connection:
+        return self._get_active_db().connect()
+
+    def save_to_s3(self) -> None:
+        self._get_active_db().save_to_s3()
+
+    def init_schema(self) -> None:
+        self._get_active_db().init_schema()
+
+    @property
+    def db_path(self) -> str:
+        return self._get_active_db().db_path

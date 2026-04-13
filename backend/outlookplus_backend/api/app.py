@@ -8,6 +8,20 @@ from outlookplus_backend.api.routes import router
 from outlookplus_backend.wiring import get_db, init_storage
 
 
+class _UserEmailMiddleware(BaseHTTPMiddleware):
+    """Route each request to the correct per-email database.
+
+    The frontend sends the IMAP username as the ``X-User-Email`` header.
+    This middleware tells the DbManager which email's DB to use before
+    the route handler runs.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        email = request.headers.get("X-User-Email")
+        get_db().set_active_email(email.strip() if email else None)
+        return await call_next(request)
+
+
 class _S3SyncMiddleware(BaseHTTPMiddleware):
     """After any mutating request (POST/PATCH/PUT/DELETE), persist the
     SQLite database to S3 so the next Lambda cold-start can restore it."""
@@ -35,7 +49,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Order matters: _UserEmailMiddleware runs BEFORE _S3SyncMiddleware,
+    # so the active email is set before any DB operation / S3 upload.
     app.add_middleware(_S3SyncMiddleware)
+    app.add_middleware(_UserEmailMiddleware)
 
     app.include_router(router)
     return app

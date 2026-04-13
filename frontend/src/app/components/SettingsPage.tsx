@@ -6,6 +6,8 @@ import {
   saveCredentials,
   deleteCredentialsRaw,
   triggerIngest,
+  getUserEmail,
+  setUserEmail,
   type CredentialsStatus,
   type SaveCredentialsInput,
 } from '../services/outlookplusApi';
@@ -24,7 +26,7 @@ export function SettingsPage() {
   // IMAP fields
   const [imapHost, setImapHost] = useState('imap.gmail.com');
   const [imapPort, setImapPort] = useState(993);
-  const [imapUsername, setImapUsername] = useState('');
+  const [imapUsername, setImapUsername] = useState(getUserEmail() ?? '');
   const [imapPassword, setImapPassword] = useState('');
   const [imapFolder, setImapFolder] = useState('INBOX');
   const [imapStatus, setImapStatus] = useState<SectionStatus>('idle');
@@ -63,12 +65,22 @@ export function SettingsPage() {
     setImapStatus('saving');
     setError(null);
     try {
+      // Persist the email address BEFORE the API call so the request
+      // already carries the correct X-User-Email header.
+      const previousEmail = getUserEmail();
+      setUserEmail(imapUsername);
+
       const updated = await saveCredentials({
         imap: { host: imapHost, port: imapPort, username: imapUsername, password: imapPassword, folder: imapFolder },
       });
       setStatus(updated);
       setImapStatus('saved');
       setTimeout(() => setImapStatus('idle'), 2000);
+
+      // If the account changed, clear stale emails from the old account.
+      if (previousEmail && previousEmail !== imapUsername) {
+        await reload();
+      }
     } catch (e: any) {
       setImapStatus('error');
       setError(e.message);
