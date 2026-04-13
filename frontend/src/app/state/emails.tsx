@@ -39,24 +39,9 @@ export function normalizeSuggestedActions(
     }
   }
 
-  // Ensure exactly 3 cards in the UI with deterministic fallbacks.
-  const trimmed = out.slice(0, 3);
-  while (trimmed.length < 3) {
-    if (trimmed.length === 0 && email.folder === 'inbox') {
-      trimmed.push({
-        kind: 'reply_draft',
-        text: 'Thanks for the email — I’ll take a look and get back to you soon.',
-        draft: {
-          to: email.sender.email,
-          subject: email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`,
-          body: 'Hi,\n\nThanks for the email — I’ll take a look and get back to you soon.\n\nBest,',
-        },
-      });
-    } else {
-      trimmed.push({ kind: 'suggestion', text: 'Ignore if no action is required.' });
-    }
-  }
-  return trimmed;
+  // Return only what Gemini actually produced (up to 3).
+  // No fallback padding — the UI shows "AI analyzing..." until results arrive.
+  return out.slice(0, 3);
 }
 
 export function toEmail(dto: EmailDto): Email {

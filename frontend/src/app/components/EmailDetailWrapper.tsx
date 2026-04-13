@@ -46,7 +46,7 @@ export function EmailDetailWrapper() {
   }
 
   return (
-    <EmailDetail email={email} />
+    <EmailDetail key={email.id} email={email} />
   );
 }
 

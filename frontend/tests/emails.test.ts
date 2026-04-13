@@ -101,7 +101,7 @@ describe('emails.tsx', () => {
   /* ============================================================== */
   /*  Test 1 – normalizeSuggestedActions: valid mixed array          */
   /* ============================================================== */
-  test('normalize: valid mixed array is parsed and padded to 3', () => {
+  test('normalize: valid mixed array returns only parsed items (no padding)', () => {
     const input = [
       'Archive it',
       {
@@ -118,30 +118,21 @@ describe('emails.tsx', () => {
 
     const result = normalizeSuggestedActions(input, email);
 
-    // Should always return exactly 3 items
-    expect(result).toHaveLength(3);
+    // Only the 2 valid items — no fallback padding
+    expect(result).toHaveLength(2);
 
-    // First: the string "Archive it" becomes a suggestion
     expect(result[0]).toEqual({ kind: 'suggestion', text: 'Archive it' });
-
-    // Second: the reply_draft object passes through
     expect(result[1]).toEqual({
       kind: 'reply_draft',
       text: 'Sounds good',
       draft: { to: 'a@b.com', subject: 'Re: Hi', body: 'Ok' },
     });
-
-    // Third: padded with fallback suggestion
-    expect(result[2]).toEqual({
-      kind: 'suggestion',
-      text: 'Ignore if no action is required.',
-    });
   });
 
   /* ============================================================== */
-  /*  Test 2 – normalizeSuggestedActions: non-array / inbox fallback */
+  /*  Test 2 – normalizeSuggestedActions: non-array returns empty    */
   /* ============================================================== */
-  test('normalize: non-array input with inbox folder returns reply_draft fallback first', () => {
+  test('normalize: non-array input returns empty array', () => {
     const email = {
       sender: { email: 'a@b.com' },
       subject: 'Hello',
@@ -150,25 +141,8 @@ describe('emails.tsx', () => {
 
     const result = normalizeSuggestedActions(null, email);
 
-    expect(result).toHaveLength(3);
-
-    // First item is the inbox-specific reply_draft fallback
-    expect(result[0].kind).toBe('reply_draft');
-    if (result[0].kind === 'reply_draft') {
-      expect(result[0].draft.to).toBe('a@b.com');
-      expect(result[0].draft.subject).toBe('Re: Hello');
-      expect(result[0].draft.body).toContain('Thanks for the email');
-    }
-
-    // Remaining 2 are generic suggestion fallbacks
-    expect(result[1]).toEqual({
-      kind: 'suggestion',
-      text: 'Ignore if no action is required.',
-    });
-    expect(result[2]).toEqual({
-      kind: 'suggestion',
-      text: 'Ignore if no action is required.',
-    });
+    // No fallback — empty until AI analysis arrives
+    expect(result).toHaveLength(0);
   });
 
   /* ============================================================== */
