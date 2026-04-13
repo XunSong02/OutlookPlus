@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import {
   Sparkles,
@@ -6,12 +6,14 @@ import {
   Send,
   ChevronRight,
   Reply,
-  Lightbulb
+  Lightbulb,
+  Loader2
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Email } from '../types';
 import { toast } from 'sonner';
-import { runAiRequest } from '../services/outlookplusApi';
+import { analyzeEmail, runAiRequest } from '../services/outlookplusApi';
+import { normalizeSuggestedActions } from '../state/emails';
 import { useCompose } from '../state/compose';
 
 /** Turn markdown links [text](url) and bare URLs into clickable <a> tags. */
@@ -49,8 +51,34 @@ export function EmailDetail({ email }: EmailDetailProps) {
   const [customAction, setCustomAction] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState(email.aiAnalysis);
+  const [aiLoading, setAiLoading] = useState(false);
 
     const { openNewMessage } = useCompose();
+
+    // Trigger AI analysis asynchronously after the email renders.
+    useEffect(() => {
+      setAiLoading(true);
+      setAiAnalysis(email.aiAnalysis);
+      setAiResponse(null);
+      const controller = new AbortController();
+      analyzeEmail({ emailId: email.id, signal: controller.signal })
+        .then((result) => {
+          setAiAnalysis({
+            category: (result.category as Email['aiAnalysis']['category']) ?? email.aiAnalysis.category,
+            sentiment: (result.sentiment as Email['aiAnalysis']['sentiment']) ?? aiAnalysis.sentiment,
+            summary: (result.summary as string) ?? aiAnalysis.summary,
+            suggestedActions: normalizeSuggestedActions(result.suggestedActions, {
+              sender: email.sender,
+              subject: email.subject,
+              folder: email.folder,
+            }),
+          });
+        })
+        .catch(() => { /* keep fallback */ })
+        .finally(() => setAiLoading(false));
+      return () => controller.abort();
+    }, [email.id]);
 
     const handleCustomSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,10 +157,10 @@ export function EmailDetail({ email }: EmailDetailProps) {
         <aside className="w-full lg:w-80 border-t lg:border-t-0 lg:border-l border-gray-200 bg-gray-50 overflow-y-auto flex flex-col shadow-[inset_4px_0_12px_-4px_rgba(0,0,0,0.05)]" aria-label="AI assistant">
             <div className="p-6 sticky top-0 bg-gray-50/95 backdrop-blur z-10 border-b border-gray-200">
                 <div className="flex items-center gap-2 text-indigo-600 font-semibold mb-1">
-                    <Sparkles size={18} aria-hidden="true" />
+                    {aiLoading ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Sparkles size={18} aria-hidden="true" />}
                     <span>AI Assistant</span>
                 </div>
-                <p className="text-xs text-gray-500">Powered by Agent v2.0</p>
+                <p className="text-xs text-gray-500">{aiLoading ? 'Analyzing email...' : 'Powered by Agent v2.0'}</p>
             </div>
             
             <div className="p-6 space-y-8">
@@ -140,7 +168,7 @@ export function EmailDetail({ email }: EmailDetailProps) {
                 <div>
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Summary</h3>
                     <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 text-sm text-gray-700 leading-relaxed">
-                        {linkify(email.aiAnalysis.summary)}
+                        {linkify(aiAnalysis.summary)}
                     </div>
                 </div>
 
@@ -149,11 +177,11 @@ export function EmailDetail({ email }: EmailDetailProps) {
                      <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Sentiment</h3>
                      <div className="flex items-center gap-3 bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
                         <div className={clsx("w-3 h-3 rounded-full", {
-                             'bg-green-500': email.aiAnalysis.sentiment === 'positive',
-                             'bg-gray-400': email.aiAnalysis.sentiment === 'neutral',
-                             'bg-red-500': email.aiAnalysis.sentiment === 'negative',
+                             'bg-green-500': aiAnalysis.sentiment === 'positive',
+                             'bg-gray-400': aiAnalysis.sentiment === 'neutral',
+                             'bg-red-500': aiAnalysis.sentiment === 'negative',
                         })} />
-                        <span className="text-sm font-medium capitalize text-gray-700">{email.aiAnalysis.sentiment}</span>
+                        <span className="text-sm font-medium capitalize text-gray-700">{aiAnalysis.sentiment}</span>
                      </div>
                 </div>
 
@@ -161,7 +189,7 @@ export function EmailDetail({ email }: EmailDetailProps) {
                 <div>
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Suggested Actions</h3>
                     <div className="space-y-2">
-                                                {email.aiAnalysis.suggestedActions.map((action, idx) => {
+                                                {aiAnalysis.suggestedActions.map((action, idx) => {
                                                     if (action.kind === 'reply_draft') {
                                                         return (
                                                             <button

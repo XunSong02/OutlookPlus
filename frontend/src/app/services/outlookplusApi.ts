@@ -178,6 +178,17 @@ export async function getEmail(input: {
   });
 }
 
+export async function analyzeEmail(input: {
+  emailId: string;
+  signal?: AbortSignal;
+}): Promise<AiAnalysisDto> {
+  return request<AiAnalysisDto>(`/api/emails/${encodeURIComponent(input.emailId)}/analyze`, {
+    method: 'POST',
+    body: {},
+    signal: input.signal,
+  });
+}
+
 export async function patchEmailRead(input: {
   emailId: string;
   read: boolean;

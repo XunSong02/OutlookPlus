@@ -297,15 +297,35 @@ def get_email_route(
     db: Db = Depends(get_db),
     analysis_service=Depends(get_email_analysis_service),
 ) -> EmailDto:
-    # Use the user's stored Gemini credentials for lazy AI analysis.
-    classifier = get_email_analysis_classifier_for_user(user_id)
+    # Return email immediately without blocking on Gemini.
+    # AI analysis is fetched separately via POST /emails/{id}/analyze.
     return get_email(
         email_id=email_id,
         user_id=user_id,
         db=db,
         analysis_service=analysis_service,
-        analysis_classifier=classifier,
+        analysis_classifier=None,
     )
+
+
+@router.post("/emails/{email_id}/analyze")
+def analyze_email_route(
+    email_id: str,
+    user_id: str = Depends(require_user_id),
+    db: Db = Depends(get_db),
+    analysis_service=Depends(get_email_analysis_service),
+) -> dict:
+    """Run AI analysis for an email (if not already done) and return the result."""
+    classifier = get_email_analysis_classifier_for_user(user_id)
+
+    with db.connect() as conn:
+        email_repo = EmailRepositorySqlite(conn)
+        email = email_repo.get_email_by_message_id(user_id=user_id, mailbox_message_id=email_id)
+        if email is None:
+            raise HTTPException(status_code=404, detail="Email not found")
+
+    classifier.classify_if_needed(user_id=user_id, email_id=email.id)
+    return analysis_service.get_for_email(user_id=user_id, email=email)
 
 
 @router.patch("/emails/{email_id}")

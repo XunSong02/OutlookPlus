@@ -134,8 +134,12 @@ export function SettingsPage() {
     setError(null);
     try {
       const result = await triggerIngest();
-      setIngestResult(`Fetched ${result.ingested} new email(s)`);
-      if (result.ingested > 0) await reload();
+      if (result.ingested > 0) {
+        await reload();
+        navigate('/inbox');
+      } else {
+        setIngestResult('No new emails found');
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {
