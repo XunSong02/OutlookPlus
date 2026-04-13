@@ -13,7 +13,7 @@ import { clsx } from 'clsx';
 import { Email } from '../types';
 import { toast } from 'sonner';
 import { analyzeEmail, runAiRequest } from '../services/outlookplusApi';
-import { normalizeSuggestedActions } from '../state/emails';
+import { normalizeSuggestedActions, useEmails } from '../state/emails';
 import { useCompose } from '../state/compose';
 
 /** Turn markdown links [text](url) and bare URLs into clickable <a> tags. */
@@ -53,17 +53,22 @@ export function EmailDetail({ email }: EmailDetailProps) {
   const [aiResponse, setAiResponse] = useState<string | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState(email.aiAnalysis);
   const [aiLoading, setAiLoading] = useState(true);
+  const [aiFailed, setAiFailed] = useState(false);
 
     const { openNewMessage } = useCompose();
+    const { updateAiAnalysis } = useEmails();
 
     // Trigger AI analysis asynchronously after the email renders.
     useEffect(() => {
       setAiLoading(true);
+      setAiFailed(false);
       setAiResponse(null);
+      let cancelled = false;
       const controller = new AbortController();
       analyzeEmail({ emailId: email.id, signal: controller.signal })
         .then((result) => {
-          setAiAnalysis({
+          if (cancelled) return;
+          const analysis: Email['aiAnalysis'] = {
             category: (result.category as Email['aiAnalysis']['category']) || 'Work',
             sentiment: (result.sentiment as Email['aiAnalysis']['sentiment']) || 'neutral',
             summary: String(result.summary ?? ''),
@@ -72,12 +77,16 @@ export function EmailDetail({ email }: EmailDetailProps) {
               subject: email.subject,
               folder: email.folder,
             }),
-          });
+          };
+          setAiAnalysis(analysis);
+          // Write back to global emails list so EmailThumbnail shows
+          // the real category/sentiment/summary.
+          updateAiAnalysis(email.id, analysis);
         })
-        .catch(() => { /* keep initial state */ })
-        .finally(() => setAiLoading(false));
-      return () => controller.abort();
-    }, [email.id]);
+        .catch(() => { if (!cancelled) setAiFailed(true); })
+        .finally(() => { if (!cancelled) setAiLoading(false); });
+      return () => { cancelled = true; controller.abort(); };
+    }, [email.id, email.sender, email.subject, email.folder, updateAiAnalysis]);
 
     const handleCustomSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -172,8 +181,14 @@ export function EmailDetail({ email }: EmailDetailProps) {
             <div className="p-6 space-y-8">
                 {aiPending ? (
                 <div className="flex flex-col items-center justify-center py-12 text-gray-400 space-y-3">
-                    <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
-                    <span className="text-sm font-medium">AI is analyzing this email...</span>
+                    {aiFailed ? (
+                      <span className="text-sm text-gray-400">AI analysis unavailable</span>
+                    ) : (
+                      <>
+                        <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
+                        <span className="text-sm font-medium">AI is analyzing this email...</span>
+                      </>
+                    )}
                 </div>
                 ) : (<>
                 {/* Summary Section */}

@@ -137,8 +137,12 @@ class DbManager:
 
     def set_active_email(self, email: str | None) -> None:
         self._active_email = email
-        # Eagerly initialise the DB for this email (schema + S3 restore).
-        self._get_active_db()
+        db = self._get_active_db()
+        # On warm Lambda instances the local DB may be stale (another
+        # instance handled the ingest and uploaded to S3).  Reset the
+        # flag so the next connect() re-downloads from S3.
+        if _s3_bucket():
+            object.__setattr__(db, "_restored", False)
 
     def _get_active_db(self) -> Db:
         key = self._active_email or "__default__"

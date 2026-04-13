@@ -83,6 +83,7 @@ type EmailsContextValue = {
   markRead: (emailId: string) => void;
   reload: () => Promise<void>;
   loadEmail: (emailId: string) => Promise<void>;
+  updateAiAnalysis: (emailId: string, analysis: Email['aiAnalysis']) => void;
 };
 
 const EmailsContext = createContext<EmailsContextValue | null>(null);
@@ -141,9 +142,15 @@ export function EmailsProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const updateAiAnalysis = useCallback((emailId: string, analysis: Email['aiAnalysis']) => {
+    setEmails((prev) =>
+      prev.map((e) => (e.id === emailId ? { ...e, aiAnalysis: analysis } : e))
+    );
+  }, []);
+
   const value = useMemo<EmailsContextValue>(
-    () => ({ emails, isLoading, isFetching, setIsFetching, markRead, reload, loadEmail }),
-    [emails, isLoading, isFetching, markRead, reload, loadEmail]
+    () => ({ emails, isLoading, isFetching, setIsFetching, markRead, reload, loadEmail, updateAiAnalysis }),
+    [emails, isLoading, isFetching, markRead, reload, loadEmail, updateAiAnalysis]
   );
 
   return <EmailsContext.Provider value={value}>{children}</EmailsContext.Provider>;
