@@ -52,7 +52,7 @@ export function EmailDetail({ email }: EmailDetailProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState(email.aiAnalysis);
-  const [aiLoading, setAiLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(true);
 
     const { openNewMessage } = useCompose();
 
@@ -107,9 +107,13 @@ export function EmailDetail({ email }: EmailDetailProps) {
             <div className="flex justify-between items-start mb-6">
                 <h1 className="text-2xl font-bold text-gray-900 leading-tight">{email.subject}</h1>
                 <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-md">
-                        {email.labels.join(', ')}
-                    </span>
+                    {aiLoading ? (
+                      <span className="text-sm text-gray-400 bg-gray-100 px-2 py-1 rounded-md animate-pulse">...</span>
+                    ) : (
+                      <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-md">
+                        {aiAnalysis.category}
+                      </span>
+                    )}
                 </div>
             </div>
 
