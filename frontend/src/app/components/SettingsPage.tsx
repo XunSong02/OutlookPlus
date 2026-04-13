@@ -137,10 +137,16 @@ export function SettingsPage() {
       await reload();
       navigate('/inbox');
     } catch (e: any) {
-      setError(e.message);
+      setIsFetching(false);
+      // Extract readable detail from API error JSON if possible.
+      let msg = e.message ?? 'Fetch failed';
+      try {
+        const match = msg.match(/\{.*"detail"\s*:\s*"([^"]+)"/);
+        if (match) msg = match[1];
+      } catch { /* keep original */ }
+      setError(msg);
     } finally {
       setIngesting(false);
-      setIsFetching(false);
     }
   };
 
