@@ -17,7 +17,7 @@ type SectionStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export function SettingsPage() {
   const navigate = useNavigate();
-  const { reload } = useEmails();
+  const { reload, setIsFetching } = useEmails();
 
   // Credential status from backend
   const [status, setStatus] = useState<CredentialsStatus | null>(null);
@@ -129,6 +129,7 @@ export function SettingsPage() {
 
   const handleTriggerIngest = async () => {
     setIngesting(true);
+    setIsFetching(true);
     setIngestResult(null);
     setError(null);
     try {
@@ -139,6 +140,7 @@ export function SettingsPage() {
       setError(e.message);
     } finally {
       setIngesting(false);
+      setIsFetching(false);
     }
   };
 

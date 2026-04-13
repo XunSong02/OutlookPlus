@@ -20,6 +20,8 @@ class EmailAnalysisClassifier:
         raw_endpoint = (os.getenv("OUTLOOKPLUS_GEMINI_ENDPOINT") or "").strip()
         if not api_key and raw_endpoint and not raw_endpoint.lower().startswith(("http://", "https://")):
             api_key = raw_endpoint
+        # Also treat user-stored credentials (injected via GeminiClient) as available.
+        has_gemini = bool(api_key) or (getattr(self.gemini, "gemini_credentials", None) is not None)
 
         with self.db.connect() as conn:
             analysis_repo = EmailAnalysisRepositorySqlite(conn)
@@ -29,11 +31,11 @@ class EmailAnalysisClassifier:
                 if str(existing.get("source") or "") != "default":
                     return
                 # If we only have a placeholder and Gemini isn't configured, nothing to do.
-                if not api_key:
+                if not has_gemini:
                     return
             else:
                 # No analysis row yet.
-                if not api_key and not allow_persist_default:
+                if not has_gemini and not allow_persist_default:
                     return
 
             email_repo = EmailRepositorySqlite(conn)

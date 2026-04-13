@@ -94,6 +94,8 @@ export function toEmail(dto: EmailDto): Email {
 type EmailsContextValue = {
   emails: Email[];
   isLoading: boolean;
+  isFetching: boolean;
+  setIsFetching: (v: boolean) => void;
   markRead: (emailId: string) => void;
   reload: () => Promise<void>;
   loadEmail: (emailId: string) => Promise<void>;
@@ -104,6 +106,7 @@ const EmailsContext = createContext<EmailsContextValue | null>(null);
 export function EmailsProvider({ children }: { children: React.ReactNode }) {
   const [emails, setEmails] = useState<Email[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(false);
   const loadedEmailIdsRef = useRef<Set<string>>(new Set());
 
   const reload = useCallback(async (signal?: AbortSignal) => {
@@ -155,8 +158,8 @@ export function EmailsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<EmailsContextValue>(
-    () => ({ emails, isLoading, markRead, reload, loadEmail }),
-    [emails, isLoading, markRead, reload, loadEmail]
+    () => ({ emails, isLoading, isFetching, setIsFetching, markRead, reload, loadEmail }),
+    [emails, isLoading, isFetching, markRead, reload, loadEmail]
   );
 
   return <EmailsContext.Provider value={value}>{children}</EmailsContext.Provider>;

@@ -161,15 +161,27 @@ def build_worker():
 
 
 def build_worker_for_user(user_id: str):
-    """Build an ingestion worker wired with the user's stored IMAP credentials."""
+    """Build an ingestion worker wired with the user's stored credentials."""
     from outlookplus_backend.worker.ingestion_worker import IngestionWorker
     from outlookplus_backend.imap.client import MailboxClient
 
     init_storage()
     imap_creds = get_credential_store().get_imap(user_id=user_id)
+    gemini = get_gemini_for_user(user_id)
     return IngestionWorker(
         db=get_db(),
         mailbox=MailboxClient(imap_credentials=imap_creds),
-        meeting_classifier=get_meeting_classifier(),
-        email_analysis_classifier=get_email_analysis_classifier(),
+        meeting_classifier=MeetingClassifier(
+            db=get_db(),
+            prompt_builder=_prompt_builder(),
+            gemini=gemini,
+            validator=_validator(),
+            ics_extractor=_ics(),
+        ),
+        email_analysis_classifier=EmailAnalysisClassifier(
+            db=get_db(),
+            prompt_builder=_prompt_builder(),
+            gemini=gemini,
+            validator=_validator(),
+        ),
     )

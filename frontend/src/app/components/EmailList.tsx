@@ -11,7 +11,7 @@ interface EmailListProps {
 export function EmailList({ folder }: EmailListProps) {
   const navigate = useNavigate();
   const { emailId } = useParams();
-  const { emails, isLoading } = useEmails();
+  const { emails, isLoading, isFetching } = useEmails();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'unread' | 'read'>('all');
 
@@ -81,10 +81,10 @@ export function EmailList({ folder }: EmailListProps) {
 
       {/* List */}
       <div className="flex-1 overflow-y-auto">
-        {isLoading ? (
+        {isLoading || (isFetching && filteredEmails.length === 0) ? (
           <div className="p-8 flex flex-col items-center justify-center text-gray-500 space-y-3">
             <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-            <span className="text-sm">Loading emails...</span>
+            <span className="text-sm">{isFetching ? 'Fetching new emails...' : 'Loading emails...'}</span>
           </div>
         ) : filteredEmails.length === 0 ? (
           <div className="p-8 text-center text-gray-500 text-sm">
