@@ -135,9 +135,10 @@ export function SettingsPage() {
     try {
       const result = await triggerIngest();
       await reload();
-      navigate('/inbox');
+      // Defer navigation to the next tick so React commits the
+      // setEmails() state update before the route change.
+      setTimeout(() => navigate('/inbox'), 50);
     } catch (e: any) {
-      setIsFetching(false);
       // Extract readable detail from API error JSON if possible.
       let msg = e.message ?? 'Fetch failed';
       try {
@@ -146,6 +147,7 @@ export function SettingsPage() {
       } catch { /* keep original */ }
       setError(msg);
     } finally {
+      setIsFetching(false);
       setIngesting(false);
     }
   };
