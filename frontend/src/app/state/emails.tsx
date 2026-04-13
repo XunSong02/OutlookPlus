@@ -153,7 +153,7 @@ export function EmailsProvider({ children }: { children: React.ReactNode }) {
       if (idx === -1) {
         return [detailed, ...prev];
       }
-      return prev.map((e) => (e.id === emailId ? { ...e, ...detailed } : e));
+      return prev.map((e) => (e.id === emailId ? { ...e, ...detailed, read: e.read } : e));
     });
   }, []);
 
