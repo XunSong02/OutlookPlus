@@ -1,6 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Email, SuggestedAction } from '../types';
-import { mockEmails } from '../data/mockEmails';
 import { EmailDto, getEmail, listEmails, patchEmailRead } from '../services/outlookplusApi';
 
 export function normalizeSuggestedActions(
@@ -119,8 +118,8 @@ export function EmailsProvider({ children }: { children: React.ReactNode }) {
       const combined = results.flatMap((r) => r.items).map(toEmail);
       setEmails(combined);
     } catch (err) {
-      console.error('Failed to load emails from backend; falling back to mock data.', err);
-      setEmails(mockEmails);
+      console.error('Failed to load emails from backend.', err);
+      setEmails([]);
     } finally {
       setIsLoading(false);
     }

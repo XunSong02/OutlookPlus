@@ -286,9 +286,9 @@ describe('emails.tsx', () => {
   });
 
   /* ============================================================== */
-  /*  Test 6 – reload: API failure falls back to mock data           */
+  /*  Test 6 – reload: API failure results in empty list             */
   /* ============================================================== */
-  test('reload: API failure falls back to mock data', async () => {
+  test('reload: API failure results in empty email list', async () => {
     const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
     // Make the API reject so reload enters the catch branch
@@ -300,8 +300,8 @@ describe('emails.tsx', () => {
       );
     });
 
-    // State should contain the mock emails from the fallback
-    expect(capturedCtx!.emails).toEqual(mockEmails);
+    // State should be empty (no mock fallback)
+    expect(capturedCtx!.emails).toEqual([]);
     expect(capturedCtx!.isLoading).toBe(false);
 
     // console.error should have been called with the failure message
