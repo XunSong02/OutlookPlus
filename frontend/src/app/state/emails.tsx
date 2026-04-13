@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Email, SuggestedAction } from '../types';
 import { mockEmails } from '../data/mockEmails';
 import { EmailDto, getEmail, listEmails, patchEmailRead } from '../services/outlookplusApi';
@@ -123,8 +123,11 @@ export function EmailsProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initial reload is triggered by MailLayout on mount (not here),
-  // so that returning from /settings also refreshes the list.
+  useEffect(() => {
+    const controller = new AbortController();
+    void reload(controller.signal);
+    return () => controller.abort();
+  }, [reload]);
 
   const markRead = useCallback((emailId: string) => {
     setEmails((prev) =>
