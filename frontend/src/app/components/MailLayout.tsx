@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Outlet, useParams } from 'react-router';
 import { Sidebar } from './Sidebar';
 import { EmailList } from './EmailList';
@@ -6,13 +6,20 @@ import { ComposeModal } from './ComposeModal';
 import { FolderType } from '../types';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { ComposeProvider, useCompose } from '../state/compose';
-import { 
-  PanelResizeHandle, 
-  Panel, 
-  PanelGroup 
+import { useEmails } from '../state/emails';
+import {
+  PanelResizeHandle,
+  Panel,
+  PanelGroup
 } from 'react-resizable-panels';
 
 export function MailLayout() {
+  const { reload } = useEmails();
+
+  // Reload emails every time the mail view mounts — covers both the
+  // initial page load and returning from /settings after a fetch.
+  useEffect(() => { reload(); }, [reload]);
+
   return (
     <ComposeProvider>
       <MailLayoutInner />
