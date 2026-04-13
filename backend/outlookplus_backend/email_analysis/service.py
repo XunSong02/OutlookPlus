@@ -129,14 +129,11 @@ def _as_action_dict(x: object) -> dict[str, object] | None:
 
 
 def _normalize_actions(*, email: EmailMessage, persisted: list[object]) -> list[dict[str, object]]:
-    persisted_items = list(persisted)
-    persisted_texts = _dedupe_text([str(x) for x in persisted_items if isinstance(x, str)])
-
-    folder = (email.folder or "").lower()
+    """Return only Gemini-generated actions. No fallback padding —
+    the frontend shows 'AI analyzing...' until real results arrive."""
     out: list[dict[str, object]] = []
 
-    # Prefer Gemini-generated actions first.
-    for item in persisted_items:
+    for item in persisted:
         if len(out) >= 3:
             break
         if isinstance(item, dict):
@@ -146,27 +143,10 @@ def _normalize_actions(*, email: EmailMessage, persisted: list[object]) -> list[
             if str(a.get("kind") or "") == "reply_draft" and _has_reply_draft(out):
                 continue
             out.append(a)
-
-    for t in persisted_texts:
-        if len(out) >= 3:
-            break
-        out.append({"kind": "suggestion", "text": t})
-
-    # If inbox and Gemini didn't provide a reply_draft, add the generic one.
-    if (folder == "inbox" or not folder) and not _has_reply_draft(out) and len(out) < 3:
-        out.insert(0, _make_reply_draft(email))
-
-    # Fill remaining slots with fallback suggestions.
-    for a in _fallback_suggestions(email):
-        if len(out) >= 3:
-            break
-        if str(a.get("kind") or "") == "reply_draft" and _has_reply_draft(out):
-            continue
-        if a.get("kind") == "suggestion":
-            t = str(a.get("text") or "").strip()
-            if any(str(x.get("text") or "").strip().lower() == t.lower() for x in out if isinstance(x, dict)):
-                continue
-        out.append(a)
+        elif isinstance(item, str):
+            t = item.strip()
+            if t:
+                out.append({"kind": "suggestion", "text": t})
 
     return out[:3]
 
@@ -190,10 +170,10 @@ class EmailAnalysisService:
 
     def _fallback(self, *, email: EmailMessage) -> dict[str, object]:
         return {
-            "category": "Work",
-            "sentiment": "neutral",
-            "summary": _fallback_summary(email),
-            "suggestedActions": _fallback_suggestions(email),
+            "category": "",
+            "sentiment": "",
+            "summary": "",
+            "suggestedActions": [],
         }
 
     def get_for_email(self, *, user_id: str, email: EmailMessage) -> dict[str, object]:
@@ -221,7 +201,7 @@ class EmailAnalysisService:
         return {
             "category": category,
             "sentiment": sentiment,
-            "summary": summary or _fallback_summary(email),
+            "summary": summary,
             "suggestedActions": suggested_actions,
         }
 
