@@ -143,9 +143,10 @@ To launch the full stack locally, you will need to open terminal windows for bot
 
 ### Continuous Integration
 
-Both frontend and backend tests run automatically on every push via GitHub Actions:
+Frontend/backend tests and security checks run automatically on push and pull requests via GitHub Actions:
 - `.github/workflows/run-frontend-tests.yml`
 - `.github/workflows/run-backend-tests.yml`
+- `.github/workflows/security-checks.yml`
 
 ---
 
