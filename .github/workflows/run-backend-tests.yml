@@ -24,13 +24,13 @@ jobs:
         working-directory: backend
 
       - name: Run the tests
-        run: python -m unittest Test.test_routes_api Test.test_repos_persistence -v
+        run: python -m unittest Test.test_routes_api Test.test_repos_persistence Test.test_backend_happy_path -v
         env:
           PYTHONPATH: backend
 
       - name: Run coverage
         run: |
-          coverage run --source=outlookplus_backend.api.routes,outlookplus_backend.persistence.repos -m unittest Test.test_routes_api Test.test_repos_persistence
+          coverage run --source=outlookplus_backend -m unittest Test.test_routes_api Test.test_repos_persistence Test.test_backend_happy_path
           coverage report -m
         env:
           PYTHONPATH: backend

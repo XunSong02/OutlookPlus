@@ -38,7 +38,7 @@ class _S3SyncMiddleware(BaseHTTPMiddleware):
 
 def create_app() -> FastAPI:
     init_storage()
-    app = FastAPI(title="OutlookPlus Backend")
+    app = FastAPI(title="OutlookPlus Backend", version="1.0.0")
 
     # Dev/demo CORS: permissive by explicit user choice.
     app.add_middleware(
