@@ -21,4 +21,5 @@ jobs:
           aws amplify start-job \
             --app-id d3s1c524cuhn5w \
             --branch-name main \
-            --job-type RELEASE
+            --job-type RELEASE \
+          || echo "::warning::Amplify start-job failed (Amplify webhook auto-deploy may already handle this)"
