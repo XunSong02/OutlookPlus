@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash build_lambda_zip.sh)",
+      "Bash(aws lambda:*)",
+      "Bash(aws s3 rm:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx vite:*)"
+    ]
+  }
+}

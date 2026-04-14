@@ -33,4 +33,27 @@ pnpm-debug.log*
 **/Thumbs.db
 **/.vscode/
 
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.egg-info/
+**/.pytest_cache/
+**/pytest-cache-files-*/
+
+# Binary / generated artifacts
+*.zip
+*.docx
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Lambda build artifacts
+backend/lambda_package.zip
+backend/lambda_build/
+
+# Submission scripts
+generate_submission_doc.py
+
 OutlookPlus/.git/
