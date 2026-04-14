@@ -51,15 +51,25 @@ export function EmailDetail({ email }: EmailDetailProps) {
   const [customAction, setCustomAction] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
+  // Check if global state already has real AI analysis (from a previous open).
+  const cachedAnalysis = email.aiAnalysis.summary || email.aiAnalysis.suggestedActions.length > 0;
   const [aiAnalysis, setAiAnalysis] = useState(email.aiAnalysis);
-  const [aiLoading, setAiLoading] = useState(true);
+  const [aiLoading, setAiLoading] = useState(!cachedAnalysis);
   const [aiFailed, setAiFailed] = useState(false);
 
     const { openNewMessage } = useCompose();
     const { updateAiAnalysis } = useEmails();
 
-    // Trigger AI analysis asynchronously after the email renders.
+    // Trigger AI analysis — skip if we already have cached results.
     useEffect(() => {
+      const hasCached = email.aiAnalysis.summary || email.aiAnalysis.suggestedActions.length > 0;
+      if (hasCached) {
+        setAiAnalysis(email.aiAnalysis);
+        setAiLoading(false);
+        setAiFailed(false);
+        return;
+      }
+
       setAiLoading(true);
       setAiFailed(false);
       setAiResponse(null);
@@ -79,14 +89,12 @@ export function EmailDetail({ email }: EmailDetailProps) {
             }),
           };
           setAiAnalysis(analysis);
-          // Write back to global emails list so EmailThumbnail shows
-          // the real category/sentiment/summary.
           updateAiAnalysis(email.id, analysis);
         })
         .catch(() => { if (!cancelled) setAiFailed(true); })
         .finally(() => { if (!cancelled) setAiLoading(false); });
       return () => { cancelled = true; controller.abort(); };
-    }, [email.id, email.sender, email.subject, email.folder, updateAiAnalysis]);
+    }, [email.id, email.aiAnalysis, updateAiAnalysis]);
 
     const handleCustomSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
