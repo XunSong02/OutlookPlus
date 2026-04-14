@@ -55,7 +55,6 @@ export function EmailDetail({ email }: EmailDetailProps) {
   const cachedAnalysis = email.aiAnalysis.summary || email.aiAnalysis.suggestedActions.length > 0;
   const [aiAnalysis, setAiAnalysis] = useState(email.aiAnalysis);
   const [aiLoading, setAiLoading] = useState(!cachedAnalysis);
-  const [aiFailed, setAiFailed] = useState(false);
 
     const { openNewMessage } = useCompose();
     const { updateAiAnalysis } = useEmails();
@@ -73,7 +72,6 @@ export function EmailDetail({ email }: EmailDetailProps) {
       }
 
       setAiLoading(true);
-      setAiFailed(false);
       setAiResponse(null);
       const controller = new AbortController();
       analyzeEmail({ emailId: email.id, signal: controller.signal })
@@ -91,7 +89,7 @@ export function EmailDetail({ email }: EmailDetailProps) {
           setAiAnalysis(analysis);
           updateAiAnalysis(email.id, analysis);
         })
-        .catch(() => setAiFailed(true))
+        .catch(() => { /* keep spinner; cached result will load on re-open */ })
         .finally(() => setAiLoading(false));
       return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -190,14 +188,9 @@ export function EmailDetail({ email }: EmailDetailProps) {
             <div className="p-6 space-y-8">
                 {aiPending ? (
                 <div className="flex flex-col items-center justify-center py-12 text-gray-400 space-y-3">
-                    {aiFailed ? (
-                      <span className="text-sm text-gray-400">AI analysis unavailable</span>
-                    ) : (
-                      <>
-                        <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
-                        <span className="text-sm font-medium">AI is analyzing this email...</span>
-                      </>
-                    )}
+                    <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
+                    <span className="text-sm font-medium">AI is analyzing this email...</span>
+                    <span className="text-xs">This may take a moment</span>
                 </div>
                 ) : (<>
                 {/* Summary Section */}
