@@ -1,0 +1,31 @@
+name: Integration Tests
+on: push
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-integ-${{ hashFiles('integration-tests/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-integ-
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: integration-tests
+
+      - name: Run integration tests against cloud
+        run: npx jest --forceExit --detectOpenHandles
+        working-directory: integration-tests
+        env:
+          TEST_API_BASE_URL: https://8ce4i37kc6.execute-api.us-east-1.amazonaws.com/prod
