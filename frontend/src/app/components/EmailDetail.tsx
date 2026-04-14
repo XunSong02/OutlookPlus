@@ -61,23 +61,23 @@ export function EmailDetail({ email }: EmailDetailProps) {
     const { updateAiAnalysis } = useEmails();
 
     // Trigger AI analysis — skip if we already have cached results.
+    // Only depends on email.id; key={email.id} guarantees remount on
+    // email switch, so cleanup/abort only fires on unmount.
     useEffect(() => {
-      const hasCached = email.aiAnalysis.summary || email.aiAnalysis.suggestedActions.length > 0;
-      if (hasCached) {
+      // Check cache: global state may already have results from a
+      // previous open (written by updateAiAnalysis).
+      if (email.aiAnalysis.summary || email.aiAnalysis.suggestedActions.length > 0) {
         setAiAnalysis(email.aiAnalysis);
         setAiLoading(false);
-        setAiFailed(false);
         return;
       }
 
       setAiLoading(true);
       setAiFailed(false);
       setAiResponse(null);
-      let cancelled = false;
       const controller = new AbortController();
       analyzeEmail({ emailId: email.id, signal: controller.signal })
         .then((result) => {
-          if (cancelled) return;
           const analysis: Email['aiAnalysis'] = {
             category: (result.category as Email['aiAnalysis']['category']) || 'Work',
             sentiment: (result.sentiment as Email['aiAnalysis']['sentiment']) || 'neutral',
@@ -91,10 +91,11 @@ export function EmailDetail({ email }: EmailDetailProps) {
           setAiAnalysis(analysis);
           updateAiAnalysis(email.id, analysis);
         })
-        .catch(() => { if (!cancelled) setAiFailed(true); })
-        .finally(() => { if (!cancelled) setAiLoading(false); });
-      return () => { cancelled = true; controller.abort(); };
-    }, [email.id, email.aiAnalysis, updateAiAnalysis]);
+        .catch(() => setAiFailed(true))
+        .finally(() => setAiLoading(false));
+      return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [email.id]);
 
     const handleCustomSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
