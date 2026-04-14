@@ -1,0 +1,17 @@
+{
+  "name": "outlookplus-integration-tests",
+  "private": true,
+  "scripts": {
+    "test": "jest --forceExit --detectOpenHandles",
+    "test:localhost": "cross-env TEST_API_BASE_URL=http://localhost:8000 jest --forceExit --detectOpenHandles",
+    "test:cloud": "cross-env TEST_API_BASE_URL=https://8ce4i37kc6.execute-api.us-east-1.amazonaws.com/prod jest --forceExit --detectOpenHandles"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "cross-env": "^10.1.0",
+    "cross-fetch": "^4.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.0.0"
+  }
+}

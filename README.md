@@ -1,155 +1,200 @@
 # OutlookPlus
-This repository is just for course: SP26-CS698004.
-OutlookPlus is an AI-powered Email Manager featuring a modern, responsive UX (React + Vite) and a powerful AI backend (FastAPI + Google Gemini). It provides AI-based email summaries, sentiment analysis, suggested replies, and background IMAP ingestion.
+
+AI-powered email client with Gmail IMAP/SMTP integration and Gemini-powered analysis.
+
+**Course**: SP26-CS698004 (NJIT)
+
+## Live Demo
+
+| Component | URL |
+|-----------|-----|
+| **Frontend** | [https://main.d3s1c524cuhn5w.amplifyapp.com](https://main.d3s1c524cuhn5w.amplifyapp.com) |
+| **Backend API** | `https://8ce4i37kc6.execute-api.us-east-1.amazonaws.com/prod` |
+
+## Using the App
+
+1. Open the frontend URL.
+2. Click **Settings** in the sidebar.
+3. Enter your **IMAP** credentials (Gmail: `imap.gmail.com`, port `993`, your email, [App Password](https://myaccount.google.com/apppasswords)).
+4. Enter your **SMTP** credentials (Gmail: `smtp.gmail.com`, port `587`, same email/app-password).
+5. Enter your **Gemini API key** ([Google AI Studio](https://aistudio.google.com/apikey)), model `gemini-3-flash-preview`.
+6. Click **Fetch Now** — emails load and you're redirected to Inbox.
+7. Click any email to view it. The AI sidebar analyzes it on first open (summary, sentiment, suggested actions).
+
+## Architecture
+
+```
+Browser  →  AWS Amplify (React + Vite)
+               ↓ HTTPS
+         API Gateway (REST)
+               ↓
+         AWS Lambda (FastAPI + Mangum, Python 3.12)
+               ↓ boto3
+         S3 (per-user SQLite databases)
+               ↕
+         Gmail IMAP/SMTP  ·  Gemini API
+```
+
+Each email account gets its own isolated SQLite database in S3, identified by the `X-User-Email` header.
+
 ## Project Structure
-This repository contains two main parts:
-- **`frontend/`**: The React + Vite application that provides the user interface. Features responsive design, light/dark modes, and accessibility improvements.
-- **`backend/`**: A Python-based backend that includes:
-  - **API Server** (FastAPI) to handle frontend requests and interface with LLM.
-  - **Ingestion Worker** to continuously fetch emails via IMAP and perform offline classification.
+
+```
+OutlookPlus/
+├── frontend/          # React + Vite (TypeScript)
+├── backend/           # FastAPI + Mangum (Python)
+├── integration-tests/ # Jest E2E integration tests
+├── Test/              # Backend unit tests (Python unittest)
+├── test-specs/        # Test specifications
+└── .github/workflows/ # CI/CD pipelines
+```
+
 ---
-## Quick Start
-To launch the full stack locally, you will need to open terminal windows for both the backend and frontend.
-### 1. Set Up the Backend (API Server & Worker)
-1. Navigate to the backend directory:
-```bash
-   cd backend
-```
-2. Set up a Python virtual environment (Python 3.10+ recommended) and install dependencies:
-```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-```
-3. Configure your environment variables:
-   Create a `.env` file in the `backend/` folder, you can use `.env tmp` and rename it to `.env`. Set the following variables:
-   - `GEMINI_API_KEY`: Your Google Gemini API key.
-   - `OUTLOOKPLUS_IMAP_USERNAME`: Your email address for IMAP access.
-   - `OUTLOOKPLUS_IMAP_PASSWORD`: Your IMAP app password.
-   - `OUTLOOKPLUS_SMTP_USERNAME`: Your email address for SMTP sending.
-   - `OUTLOOKPLUS_SMTP_PASSWORD`: Your SMTP app password.
-   - `OUTLOOKPLUS_AUTH_MODE=A` (for local demo/dev without auth restrictions).
 
-   > This is a public repository. Credentials are not included and must be configured locally before running.
+## Development Setup
 
-4. Run the API Server:
+### Prerequisites
+
+- Node.js 20+
+- Python 3.12+
+- AWS CLI configured with credentials
+
+### Backend
+
 ```bash
-   python run_api.py
+cd backend
+pip install -r requirements.txt
+
+# Set environment variables or create .env:
+export OUTLOOKPLUS_DB_PATH=data/outlookplus.db
+export OUTLOOKPLUS_AUTH_MODE=A
+
+uvicorn outlookplus_backend.api.app:create_app --factory --reload
+# → http://localhost:8000
 ```
-   
-5. Run the IMAP Ingestion Worker in another terminal:
+
+### Frontend
+
 ```bash
-   python run_worker.py
+cd frontend
+npm install
+npm run dev
+# → http://localhost:5173 (proxies /api to localhost:8000)
 ```
-### 2. Set Up the Frontend
-1. Open a new terminal and navigate to the frontend directory:
-```bash
-   cd frontend
-```
-2. Install Node.js dependencies:
-```bash
-   npm install
-```
-3. Start the dev server:
-```bash
-   npm run dev
-```
-   *The frontend will be available at `http://localhost:5173` (or similar).* By default, any `/api` requests will proxy to the backend running at `127.0.0.1:8000`.
 
 ---
 
 ## Running Tests
 
-### Frontend Tests
+### Frontend Unit Tests
 
-**Prerequisites:**
-- [Node.js](https://nodejs.org/) v18 or higher
-- npm (comes with Node.js)
+```bash
+cd frontend
+npm install
+npm test                 # run tests
+npm run test:coverage    # with coverage
+```
 
-**Frameworks & libraries used:**
-- [Jest](https://jestjs.io/) (v30) -- test runner
-- [ts-jest](https://kulshekhar.github.io/ts-jest/) -- TypeScript support for Jest
-- [jest-environment-jsdom](https://www.npmjs.com/package/jest-environment-jsdom) -- browser DOM simulation
-- [@testing-library/react](https://testing-library.com/docs/react-testing-library/intro/) -- React component testing
-- [@testing-library/jest-dom](https://github.com/testing-library/jest-dom) -- custom DOM matchers
+Test files: `frontend/tests/`
 
-**Steps:**
+### Backend Unit Tests
 
-1. Navigate to the frontend directory and install dependencies:
-   ```bash
-   cd frontend
-   npm install
-   ```
+```bash
+# From project root:
+PYTHONPATH=backend python -m pytest Test/ -v
 
-2. Run the tests:
-   ```bash
-   npm test
-   ```
+# With coverage:
+PYTHONPATH=backend coverage run --source=outlookplus_backend -m pytest Test/
+coverage report -m
+```
 
-3. Run the tests with code coverage report:
-   ```bash
-   npm run test:coverage
-   ```
+Test files: `Test/`
 
-**Test files** are located in `frontend/tests/`:
-- `emails.test.ts` -- tests for the emails state management module
-- `outlookplusApi.test.ts` -- tests for the API client service
+### Integration Tests
 
----
+```bash
+cd integration-tests
+npm install
 
-### Backend Tests
+# Against cloud deployment:
+npm run test:cloud
 
-**Prerequisites:**
-- [Python](https://www.python.org/) 3.10 or higher
-- pip (comes with Python)
+# Against localhost (start backend first):
+npm run test:localhost
+```
 
-**Frameworks & libraries used:**
-- [unittest](https://docs.python.org/3/library/unittest.html) -- Python's built-in test framework (no extra install needed)
-- [coverage](https://coverage.readthedocs.io/) -- code coverage measurement
+Test files: `integration-tests/api.integration.test.ts`
 
-**Steps:**
-
-1. Navigate to the backend directory, set up a virtual environment, and install dependencies:
-   ```bash
-   cd backend
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   pip install coverage
-   ```
-
-2. Run the tests from the **project root** directory (not `backend/`):
-   ```bash
-   cd ..  # back to project root
-   PYTHONPATH=backend python -m unittest Test.test_routes_api Test.test_repos_persistence -v
-   ```
-   On Windows CMD, set the environment variable first:
-   ```cmd
-   set PYTHONPATH=backend
-   python -m unittest Test.test_routes_api Test.test_repos_persistence -v
-   ```
-
-3. Run the tests with code coverage report:
-   ```bash
-   PYTHONPATH=backend coverage run --source=outlookplus_backend.api.routes,outlookplus_backend.persistence.repos -m unittest Test.test_routes_api Test.test_repos_persistence
-   coverage report -m
-   ```
-
-**Test files** are located in `Test/`:
-- `test_routes_api.py` -- unit tests for the REST API route handlers (`routes.py`)
-- `test_repos_persistence.py` -- unit tests for the database repository layer (`repos.py`)
+Some tests require real credentials via environment variables and only run in cloud CI:
+- `TEST_IMAP_HOST`, `TEST_IMAP_USERNAME`, `TEST_IMAP_PASSWORD`
+- `TEST_SMTP_HOST`, `TEST_SMTP_USERNAME`, `TEST_SMTP_PASSWORD`
+- `TEST_GEMINI_API_KEY`
 
 ---
 
-### Continuous Integration
+## CI/CD Workflows
 
-Both frontend and backend tests run automatically on every push via GitHub Actions:
-- `.github/workflows/run-frontend-tests.yml`
-- `.github/workflows/run-backend-tests.yml`
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| [`run-frontend-tests.yml`](.github/workflows/run-frontend-tests.yml) | Every push | Jest unit tests for React frontend |
+| [`run-backend-tests.yml`](.github/workflows/run-backend-tests.yml) | Every push | Python unittest for backend |
+| [`run-integration-tests.yml`](.github/workflows/run-integration-tests.yml) | Every push | End-to-end API integration tests |
+| [`deploy-aws-lambda.yml`](.github/workflows/deploy-aws-lambda.yml) | Push to `main` | Package and deploy Lambda |
+| [`deploy-aws-amplify.yml`](.github/workflows/deploy-aws-amplify.yml) | Push to `main` | Trigger Amplify redeploy |
 
 ---
 
-## Documentation
-For more detailed setup, data storage mechanisms, and specific configurations:
-- [Backend Documentation](backend/README.md)
-- [Frontend Documentation](frontend/README.md)
+## Deploying to AWS (Fork Setup Guide)
+
+### 1. S3 Bucket
+
+```bash
+aws s3 mb s3://your-outlookplus-data
+```
+
+### 2. Lambda (Backend)
+
+1. Create IAM role `OutlookPlusLambdaRole` with `AWSLambdaBasicExecutionRole` + inline S3 policy:
+   ```json
+   {
+     "Effect": "Allow",
+     "Action": ["s3:GetObject", "s3:PutObject"],
+     "Resource": "arn:aws:s3:::your-outlookplus-data/*"
+   }
+   ```
+
+2. Build and create the function:
+   ```bash
+   cd backend && bash build_lambda_zip.sh
+   aws lambda create-function \
+     --function-name OutlookPlusBackend \
+     --runtime python3.12 \
+     --handler lambda_handler.handler \
+     --role arn:aws:iam::<ACCOUNT_ID>:role/OutlookPlusLambdaRole \
+     --zip-file fileb://lambda_package.zip \
+     --timeout 120 --memory-size 256 \
+     --environment 'Variables={OUTLOOKPLUS_DB_PATH=/tmp/data/outlookplus.db,OUTLOOKPLUS_ATTACHMENTS_DIR=/tmp/data/attachments,OUTLOOKPLUS_AUTH_MODE=A,OUTLOOKPLUS_S3_BUCKET=your-outlookplus-data}'
+   ```
+
+### 3. API Gateway
+
+1. Create a REST API with `{proxy+}` resource, `ANY` method, `AWS_PROXY` integration to your Lambda.
+2. Deploy to a `prod` stage.
+
+### 4. Amplify (Frontend)
+
+1. Connect your GitHub repo to AWS Amplify.
+2. Set app root to `frontend/`.
+3. Add environment variable: `VITE_API_BASE_URL` = your API Gateway invoke URL.
+
+### 5. GitHub Secrets (for CI/CD)
+
+Add to your repo (Settings → Secrets → Actions):
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+
+### 6. Branch Protection
+
+In GitHub Settings → Branches → Add classic protection rule for `main`:
+- ✅ Require pull request before merging
+- ✅ Require status checks to pass: `Frontend Tests`, `Backend Tests`, `Integration Tests`
