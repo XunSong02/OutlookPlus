@@ -62,17 +62,23 @@ export function EmailThumbnail({ email, isActive, onClick, className }: EmailThu
       </div>
 
       <div className="text-xs text-gray-500 line-clamp-2 mb-3 leading-relaxed">
-        {email.aiAnalysis.summary}
+        {email.aiAnalysis.summary || email.preview}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mt-2">
-        {/* Category Badge */}
-        <span className={clsx(
-            "text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border border-transparent",
-            categoryColor[email.aiAnalysis.category] || "bg-gray-100 text-gray-600"
-        )}>
-            {email.aiAnalysis.category}
-        </span>
+        {/* Category Badge — only show if AI has analyzed (summary non-empty) */}
+        {email.aiAnalysis.summary ? (
+          <span className={clsx(
+              "text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border border-transparent",
+              categoryColor[email.aiAnalysis.category] || "bg-gray-100 text-gray-600"
+          )}>
+              {email.aiAnalysis.category}
+          </span>
+        ) : (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 animate-pulse">
+              analyzing...
+          </span>
+        )}
 
         {/* User Labels */}
         {email.labels.map((label) => (
