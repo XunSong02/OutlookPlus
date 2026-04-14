@@ -76,7 +76,7 @@ export function EmailThumbnail({ email, isActive, onClick, className }: EmailThu
           </span>
         ) : (
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 animate-pulse">
-              等待分析
+              pending...
           </span>
         )}
 
