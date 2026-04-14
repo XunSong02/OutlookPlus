@@ -20,7 +20,7 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install Dependencies
-        run: pip install -r requirements.txt coverage
+        run: pip install -r requirements.txt coverage httpx
         working-directory: backend
 
       - name: Run the tests
