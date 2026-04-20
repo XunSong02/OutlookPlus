@@ -90,9 +90,9 @@ export function Sidebar({ className, onComposeClick }: SidebarProps) {
 
         <div className="w-10 h-px bg-gray-200 my-2 shrink-0" />
 
-        {['Work', 'Personal', 'Finance', 'Urgent'].map((label) => (
-            <NavLink 
-                key={label} 
+        {['Work', 'Personal', 'Finance', 'Social', 'Promotions', 'Urgent'].map((label) => (
+            <NavLink
+                key={label}
                 to={`/${label}`}
                 className={({ isActive }) =>
                   clsx(
@@ -108,6 +108,8 @@ export function Sidebar({ className, onComposeClick }: SidebarProps) {
                     'bg-purple-500': label === 'Work',
                     'bg-green-500': label === 'Personal',
                     'bg-yellow-500': label === 'Finance',
+                    'bg-blue-500': label === 'Social',
+                    'bg-pink-500': label === 'Promotions',
                     'bg-red-500': label === 'Urgent',
                 })}></span>
                 <span className="text-[9px] text-gray-500 font-medium truncate max-w-full px-1">{label}</span>
