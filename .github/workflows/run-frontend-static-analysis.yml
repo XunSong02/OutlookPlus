@@ -1,0 +1,32 @@
+name: Frontend Static Analysis
+on: push
+jobs:
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install Dependencies
+        run: npm install
+        working-directory: frontend
+
+      - name: Type-check (TypeScript)
+        run: npm run typecheck
+        working-directory: frontend
+
+      - name: Lint (ESLint)
+        run: npm run lint
+        working-directory: frontend
