@@ -125,6 +125,16 @@ def _parse_recipients(value: str | None) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
+@router.get("/health")
+def health_check() -> dict:
+    """Liveness probe — confirms the backend is up and reachable."""
+    return {"status": "ok", "service": "OutlookPlus Backend", "version": "1.0.0"}
+
+
+# ---------------------------------------------------------------------------
 # Credential management endpoints
 # ---------------------------------------------------------------------------
 
