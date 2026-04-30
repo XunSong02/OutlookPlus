@@ -7,6 +7,11 @@ frontend:
         - npm install
     build:
       commands:
+        # Demo lock — every Amplify build hard-codes this account so all
+        # devices visiting the site share the same backend DB. Override by
+        # setting VITE_LOCKED_USER_EMAIL in the Amplify Console.
+        - export VITE_API_BASE_URL="${VITE_API_BASE_URL:-https://8ce4i37kc6.execute-api.us-east-1.amazonaws.com/prod}"
+        - export VITE_LOCKED_USER_EMAIL="${VITE_LOCKED_USER_EMAIL:-mollyz0913@gmail.com}"
         - npm run build
   artifacts:
     baseDirectory: frontend/dist

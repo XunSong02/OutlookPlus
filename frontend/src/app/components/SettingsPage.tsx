@@ -8,6 +8,7 @@ import {
   triggerIngest,
   getUserEmail,
   setUserEmail,
+  isUserEmailLocked,
   type CredentialsStatus,
   type SaveCredentialsInput,
 } from '../services/outlookplusApi';
@@ -18,6 +19,7 @@ type SectionStatus = 'idle' | 'saving' | 'saved' | 'error';
 export function SettingsPage() {
   const navigate = useNavigate();
   const { reload, setIsFetching } = useEmails();
+  const accountLocked = isUserEmailLocked();
 
   // Navigate to inbox AFTER React has committed the setEmails() state
   // update. useEffect runs post-render, so the context value is guaranteed
@@ -232,8 +234,20 @@ export function SettingsPage() {
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Username (Email)</label>
-              <input type="email" value={imapUsername} onChange={(e) => setImapUsername(e.target.value)} placeholder="you@gmail.com" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Username (Email)
+                {accountLocked && (
+                  <span className="ml-2 text-[10px] font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">LOCKED (demo)</span>
+                )}
+              </label>
+              <input
+                type="email"
+                value={imapUsername}
+                onChange={(e) => setImapUsername(e.target.value)}
+                placeholder="you@gmail.com"
+                disabled={accountLocked}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+              />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Password / App Password</label>

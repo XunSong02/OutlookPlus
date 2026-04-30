@@ -21,8 +21,21 @@ export function getAuthToken(): string | undefined {
 
 const USER_EMAIL_KEY = 'outlookplus_user_email';
 
-/** Get the active user email (IMAP username) stored in localStorage. */
+/** When set at build time, all clients are locked to this single account
+ *  so a classroom demo behaves identically across devices/browsers. */
+function getLockedUserEmail(): string | undefined {
+  const v = import.meta.env.VITE_LOCKED_USER_EMAIL as string | undefined;
+  return v && v.trim() ? v.trim() : undefined;
+}
+
+export function isUserEmailLocked(): boolean {
+  return getLockedUserEmail() !== undefined;
+}
+
+/** Get the active user email (IMAP username). Honors the build-time lock first. */
 export function getUserEmail(): string | undefined {
+  const locked = getLockedUserEmail();
+  if (locked) return locked;
   try {
     return localStorage.getItem(USER_EMAIL_KEY) || undefined;
   } catch {
@@ -30,8 +43,9 @@ export function getUserEmail(): string | undefined {
   }
 }
 
-/** Set (or clear) the active user email in localStorage. */
+/** Set (or clear) the active user email in localStorage. No-op when locked. */
 export function setUserEmail(email: string | undefined): void {
+  if (isUserEmailLocked()) return;
   try {
     if (email) {
       localStorage.setItem(USER_EMAIL_KEY, email);
