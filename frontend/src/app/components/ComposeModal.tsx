@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, Paperclip, Send, Mic, Sparkles } from 'lucide-react';
+import { X, Paperclip, Send, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { sendEmail, suggestCompose } from '../services/outlookplusApi';
 import { useEmails } from '../state/emails';
@@ -202,9 +202,6 @@ export function ComposeModal({ isOpen, onClose, draft }: ComposeModalProps) {
             <div className="flex items-center gap-2">
               <button type="button" className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors" aria-label="Attach a file">
                 <Paperclip size={18} aria-hidden="true" />
-              </button>
-              <button type="button" className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors" aria-label="Record audio">
-                <Mic size={18} aria-hidden="true" />
               </button>
             </div>
 
