@@ -65,6 +65,18 @@ class CredentialStore:
         self._db = db
         self._ensure_table()
 
+    # When ``OUTLOOKPLUS_DEMO_USER_EMAIL`` is set, env-var fallbacks apply
+    # ONLY to that user — every other ``user_id`` sees an unconfigured
+    # state (which keeps per-user-isolation tests honest).  When the
+    # variable is unset, env fallback applies to every user (the
+    # historical local-dev behavior).
+    @staticmethod
+    def _env_fallback_allowed(user_id: str) -> bool:
+        demo = (os.getenv("OUTLOOKPLUS_DEMO_USER_EMAIL") or "").strip().lower()
+        if not demo:
+            return True
+        return (user_id or "").strip().lower() == demo
+
     # -- bootstrap --------------------------------------------------------
 
     def _ensure_table(self) -> None:
@@ -124,6 +136,8 @@ class CredentialStore:
                 password=raw["password"],
                 folder=raw.get("folder", "INBOX"),
             )
+        if not self._env_fallback_allowed(user_id):
+            return None
         # Fallback to env
         host = os.getenv("OUTLOOKPLUS_IMAP_HOST")
         username = os.getenv("OUTLOOKPLUS_IMAP_USERNAME")
@@ -147,6 +161,8 @@ class CredentialStore:
                 username=raw["username"],
                 password=raw["password"],
             )
+        if not self._env_fallback_allowed(user_id):
+            return None
         # Fallback to env
         host = os.getenv("OUTLOOKPLUS_SMTP_HOST")
         username = os.getenv("OUTLOOKPLUS_SMTP_USERNAME")
@@ -167,6 +183,8 @@ class CredentialStore:
                 api_key=raw["api_key"],
                 model=raw.get("model", "gemini-3-flash-preview"),
             )
+        if not self._env_fallback_allowed(user_id):
+            return None
         # Fallback to env
         api_key = (os.getenv("GEMINI_API_KEY") or "").strip() or (os.getenv("OUTLOOKPLUS_GEMINI_API_KEY") or "").strip()
         if api_key:
