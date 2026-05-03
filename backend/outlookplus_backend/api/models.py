@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 Folder = Literal["inbox", "sent", "drafts", "trash", "spam"]
-AiCategory = Literal["Work", "Personal", "Finance", "Social", "Promotions", "Urgent"]
+AiCategory = Literal["Work", "Finance", "Social", "Promotions", "Urgent"]
 Sentiment = Literal["positive", "neutral", "negative"]
 
 

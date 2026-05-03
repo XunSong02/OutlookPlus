@@ -140,7 +140,7 @@ export type SuggestedActionDto =
     };
 
 export type AiAnalysisDto = {
-  category: 'Work' | 'Personal' | 'Finance' | 'Social' | 'Promotions' | 'Urgent';
+  category: 'Work' | 'Finance' | 'Social' | 'Promotions' | 'Urgent';
   sentiment: 'positive' | 'neutral' | 'negative';
   summary: string;
   suggestedActions: Array<string | SuggestedActionDto>;

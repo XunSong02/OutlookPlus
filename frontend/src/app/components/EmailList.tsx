@@ -25,7 +25,7 @@ export function EmailList({ folder }: EmailListProps) {
             return email.folder === currentFolder;
         }
         // Label/category view: an email can show up in multiple views.
-        // Match either explicit labels OR the AI category (Work/Personal/Finance/Urgent).
+        // Match either explicit labels OR the AI category (Work/Finance/Social/Promotions/Urgent).
         return email.labels.includes(currentFolder) || email.aiAnalysis.category === currentFolder;
       })
       .filter((email) => {

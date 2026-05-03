@@ -13,7 +13,7 @@ export interface Email {
   folder: 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam';
   labels: string[];
   aiAnalysis: {
-    category: 'Work' | 'Personal' | 'Finance' | 'Social' | 'Promotions' | 'Urgent';
+    category: 'Work' | 'Finance' | 'Social' | 'Promotions' | 'Urgent';
     sentiment: 'positive' | 'neutral' | 'negative';
     summary: string;
     suggestedActions: SuggestedAction[];

@@ -9,7 +9,7 @@ from outlookplus_backend.persistence.repos import EmailAnalysisRepositorySqlite
 from outlookplus_backend.utils.mail import decode_rfc2047
 
 
-_ALLOWED_CATEGORIES = {"Work", "Personal", "Finance", "Social", "Promotions", "Urgent"}
+_ALLOWED_CATEGORIES = {"Work", "Finance", "Social", "Promotions", "Urgent"}
 _ALLOWED_SENTIMENT = {"positive", "neutral", "negative"}
 
 

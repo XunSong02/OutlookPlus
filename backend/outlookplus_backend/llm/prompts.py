@@ -93,7 +93,7 @@ class PromptBuilder:
         return (
             "You are a classifier for email category and sentiment, plus a brief summary and suggested actions.\n"
             "Return ONLY valid JSON matching this schema:\n"
-            '{"category": "Work"|"Personal"|"Finance"|"Social"|"Promotions"|"Urgent", '
+            '{"category": "Work"|"Finance"|"Social"|"Promotions"|"Urgent", '
             '"sentiment": "positive"|"neutral"|"negative", "summary": string, "suggestedActions": '
             '[{ "kind": "reply_draft"|"suggestion", "text": string, "draft"?: {"to": string, "subject": string, "body": string} }]}\n\n'
             "Rules:\n"

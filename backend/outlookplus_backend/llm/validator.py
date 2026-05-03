@@ -77,7 +77,7 @@ class StrictJsonValidator:
 
         category = obj["category"]
         _require(isinstance(category, str), "category must be string")
-        _require(category in {"Work", "Personal", "Finance", "Social", "Promotions", "Urgent"}, "invalid category")
+        _require(category in {"Work", "Finance", "Social", "Promotions", "Urgent"}, "invalid category")
 
         sentiment = obj["sentiment"]
         _require(isinstance(sentiment, str), "sentiment must be string")
