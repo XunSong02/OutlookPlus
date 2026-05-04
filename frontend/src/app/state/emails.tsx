@@ -132,7 +132,12 @@ export function EmailsProvider({ children }: { children: React.ReactNode }) {
     if (loadedEmailIdsRef.current.has(emailId)) return;
 
     const detailed = toEmail(await getEmail({ emailId }));
-    loadedEmailIdsRef.current.add(emailId);
+    // Only cache the load if the body actually came through. If it didn't
+    // (e.g. IMAP hadn't indexed it yet), leave the id out of the cache so
+    // the next click retries instead of locking in the empty state.
+    if (detailed.body) {
+      loadedEmailIdsRef.current.add(emailId);
+    }
     setEmails((prev) => {
       const idx = prev.findIndex((e) => e.id === emailId);
       if (idx === -1) {
